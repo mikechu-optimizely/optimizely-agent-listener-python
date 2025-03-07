@@ -6,9 +6,9 @@ This module handles sending Optimizely Agent notification data to Google Analyti
 """
 
 import os
-import json
 import logging
 import requests
+import time
 from typing import Dict, Any
 
 # Set up logging
@@ -50,126 +50,135 @@ def get_ga_config() -> Dict[str, str]:
 
 def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Transform Optimizely notification data into a format suitable for Google Analytics.
+    Transform Optimizely notification data into Google Analytics 4 format.
     
     Args:
         event_data: The notification event data from Optimizely
         
     Returns:
-        Dict containing transformed data for GA
+        Dict containing the transformed data in GA4 format
     """
+    # Validate input
     if not isinstance(event_data, dict):
-        logger.warning(f"Invalid event_data type: {type(event_data)}, expected dict")
-        return {"name": "optimizely_unknown", "params": {}}
-        
+        logger.error(f"Invalid event_data type: {type(event_data)}")
+        return {"name": "error", "params": {"error": "invalid_input"}}
+    
     # Get notification type
     notification_type = event_data.get("type", "unknown")
-    
-    # Extract user ID with proper validation
-    user_id = event_data.get("userId", "")
-    if not isinstance(user_id, str):
-        user_id = str(user_id)
     
     # Base event data
     ga_event = {
         "name": f"optimizely_{notification_type}",
         "params": {
             "notification_type": notification_type,
-            "user_id": user_id
         }
     }
     
-    # Handle different notification types
-    if notification_type == "decision":
-        # Extract decision type if available (flag, experiment, etc.)
-        if "decisionType" in event_data:
-            ga_event["params"]["decision_type"] = event_data["decisionType"]
-            
-        if "decision" in event_data:
-            decision = event_data["decision"]
-            if not isinstance(decision, dict):
-                logger.warning(f"Invalid decision type: {type(decision)}, expected dict")
-                return ga_event
-                
-            # Extract standard decision fields
-            ga_event["params"].update({
-                "feature_key": decision.get("featureKey", ""),
-                "rule_key": decision.get("ruleKey", ""),
-                "variation_key": decision.get("variationKey", ""),
-                "flag_key": decision.get("flagKey", decision.get("featureKey", "")),
-            })
-            
-            # Add enabled status if available
-            if "enabled" in decision:
-                ga_event["params"]["enabled"] = decision.get("enabled", False)
-                
-            # Add decision_event_dispatched if available
-            if "decision_event_dispatched" in decision:
-                ga_event["params"]["decision_event_dispatched"] = decision.get("decision_event_dispatched", False)
-            
-            # Add variables if available
-            if "variables" in decision and decision["variables"]:
-                # Convert variables to a string for GA
-                ga_event["params"]["variables"] = json.dumps(decision["variables"])
-                
-                # Also add individual variables as separate parameters for better reporting
-                for var_key, var_value in decision["variables"].items():
-                    # Prefix with 'var_' to avoid potential conflicts
-                    param_key = f"var_{var_key}"
-                    # Convert complex values to strings
-                    if isinstance(var_value, (dict, list)):
-                        ga_event["params"][param_key] = json.dumps(var_value)
-                    else:
-                        ga_event["params"][param_key] = var_value
-    
-    elif notification_type == "track":
-        # Basic track event data
-        ga_event["params"].update({
-            "event_key": event_data.get("eventKey", ""),
-            "event_name": event_data.get("eventName", event_data.get("eventKey", "")),
-        })
-        
-        # Add experiment IDs if available
-        if "experimentIds" in event_data:
-            experiment_ids = event_data.get("experimentIds", [])
-            if experiment_ids:
-                ga_event["params"]["experiment_ids"] = json.dumps(experiment_ids)
-        
-        # Add event tags if available
-        if "eventTags" in event_data and event_data["eventTags"]:
-            if isinstance(event_data["eventTags"], dict):
-                # Store event tags as a JSON string
-                ga_event["params"]["event_tags"] = json.dumps(event_data["eventTags"])
-                
-                # Also add individual event tags as separate parameters for better reporting
-                for tag_key, tag_value in event_data["eventTags"].items():
-                    # Prefix with 'tag_' to avoid potential conflicts
-                    param_key = f"tag_{tag_key}"
-                    # Convert complex values to strings
-                    if isinstance(tag_value, (dict, list)):
-                        ga_event["params"][param_key] = json.dumps(tag_value)
-                    else:
-                        ga_event["params"][param_key] = tag_value
-                        
-                # Special handling for revenue
-                if "revenue" in event_data["eventTags"]:
-                    try:
-                        revenue = float(event_data["eventTags"]["revenue"])
-                        # GA4 uses 'value' for revenue/conversion value
-                        ga_event["params"]["value"] = revenue
-                    except (ValueError, TypeError):
-                        logger.warning(f"Invalid revenue value: {event_data['eventTags']['revenue']}")
+    # Add user properties if available
+    user_id = event_data.get("userId")
+    if user_id:
+        ga_event["params"]["user_id"] = str(user_id)
     
     # Add user attributes if available
-    if "attributes" in event_data and isinstance(event_data["attributes"], dict):
-        for attr_key, attr_value in event_data["attributes"].items():
-            # Prefix with 'attr_' to avoid potential conflicts
-            param_key = f"attr_{attr_key}"
-            # Convert complex values to strings
-            if isinstance(attr_value, (dict, list)):
-                ga_event["params"][param_key] = json.dumps(attr_value)
+    attributes = event_data.get("attributes", {})
+    if attributes and isinstance(attributes, dict):
+        for key, value in attributes.items():
+            # Prefix attribute keys to avoid conflicts with GA4 reserved parameters
+            param_key = f"attr_{key}"
+            
+            # Ensure values are of supported types (string, number, boolean)
+            if isinstance(value, (str, int, float, bool)):
+                ga_event["params"][param_key] = value
             else:
-                ga_event["params"][param_key] = attr_value
+                # Convert other types to string
+                ga_event["params"][param_key] = str(value)
+    
+    # Process based on notification type
+    if notification_type == "decision":
+        # Handle decision notification
+        decision = event_data.get("decision", {})
+        if decision and isinstance(decision, dict):
+            # Add decision type if available
+            decision_type = event_data.get("decisionType")
+            if decision_type:
+                ga_event["params"]["decision_type"] = decision_type
+            
+            # Add feature/experiment keys
+            for key in ["featureKey", "experimentKey", "flagKey", "ruleKey", "variationKey"]:
+                if key in decision:
+                    ga_event["params"][key] = decision[key]
+            
+            # Add enabled flag
+            if "enabled" in decision:
+                ga_event["params"]["enabled"] = decision["enabled"]
+                
+            # Add decision event dispatched flag
+            if "decision_event_dispatched" in decision:
+                ga_event["params"]["decision_event_dispatched"] = decision["decision_event_dispatched"]
+            
+            # Process variables if available
+            variables = decision.get("variables", {})
+            if variables and isinstance(variables, dict):
+                for var_key, var_value in variables.items():
+                    # Prefix variable keys to avoid conflicts
+                    param_key = f"var_{var_key}"
+                    
+                    # Ensure values are of supported types
+                    if isinstance(var_value, (str, int, float, bool)):
+                        ga_event["params"][param_key] = var_value
+                    else:
+                        # Convert other types to string
+                        ga_event["params"][param_key] = str(var_value)
+    
+    elif notification_type == "track":
+        # Handle track notification
+        
+        # Add event key and name
+        event_key = event_data.get("eventKey")
+        if event_key:
+            ga_event["params"]["event_key"] = event_key
+            
+        event_name = event_data.get("eventName")
+        if event_name:
+            ga_event["params"]["event_name"] = event_name
+        
+        # Add experiment IDs if available
+        experiment_ids = event_data.get("experimentIds", [])
+        if experiment_ids and isinstance(experiment_ids, list):
+            ga_event["params"]["experiment_ids"] = ",".join(str(id) for id in experiment_ids)
+        
+        # Process event tags if available
+        event_tags = event_data.get("eventTags", {})
+        if event_tags and isinstance(event_tags, dict):
+            # Handle revenue as a special case for GA4's "value" parameter
+            if "revenue" in event_tags:
+                try:
+                    revenue = float(event_tags["revenue"])
+                    ga_event["params"]["value"] = revenue
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid revenue value: {event_tags['revenue']}")
+            
+            # Process other event tags
+            for tag_key, tag_value in event_tags.items():
+                if tag_key != "revenue":  # Skip revenue as it's already handled
+                    # Prefix tag keys to avoid conflicts
+                    param_key = f"tag_{tag_key}"
+                    
+                    # Ensure values are of supported types
+                    if isinstance(tag_value, (str, int, float, bool)):
+                        ga_event["params"][param_key] = tag_value
+                    else:
+                        # Convert other types to string
+                        ga_event["params"][param_key] = str(tag_value)
+    
+    # Add timestamp if available (convert to microseconds for GA4)
+    if "timestamp" in event_data:
+        try:
+            # Convert milliseconds to microseconds
+            timestamp_micros = int(event_data["timestamp"]) * 1000
+            ga_event["params"]["timestamp_micros"] = timestamp_micros
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid timestamp: {event_data['timestamp']}")
     
     return ga_event
 
@@ -200,13 +209,28 @@ def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
         # Transform Optimizely data for GA
         ga_event = transform_optimizely_data(event_data)
         
+        # Add required parameters for Realtime reporting
+        if "params" in ga_event:
+            # Add session_id if not present
+            if "session_id" not in ga_event["params"]:
+                ga_event["params"]["session_id"] = str(int(time.time() * 1000))  # Generate session_id in milliseconds
+            
+            # Add engagement_time_msec if not present
+            if "engagement_time_msec" not in ga_event["params"]:
+                ga_event["params"]["engagement_time_msec"] = 100
+        
         # Prepare the payload
         payload = {
-            "client_id": "optimizely-agent",  # Can be customized or derived from user ID
+            "client_id": event_data.get("userId", "optimizely-agent"),  # Use userId as client_id if available
             "events": [ga_event]
         }
         
-        # Determine endpoint
+        # Add user_id if available
+        user_id = event_data.get("userId")
+        if user_id:
+            payload["user_id"] = str(user_id)
+        
+        # Construct URL with required parameters
         url = f"{config['endpoint_url']}?measurement_id={config['measurement_id']}&api_secret={config['api_secret']}"
         
         # Implement retries for resilience
@@ -231,7 +255,6 @@ def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
                 elif response.status_code == 429:  # Rate limiting
                     if attempt < MAX_RETRIES - 1:
                         # Exponential backoff: 1s, 2s, 4s
-                        import time
                         backoff = 2 ** attempt
                         logger.warning(f"Rate limited by Google Analytics. Retrying in {backoff}s...")
                         time.sleep(backoff)
