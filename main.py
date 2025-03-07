@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from google_analytics import send_to_google_analytics
 from amplitude import send_to_amplitude
+import sseclient
+import requests
 
 # Set up logging first, so we can log any issues with environment loading
 logging.basicConfig(
@@ -76,7 +78,6 @@ def process_notification(notification):
         # Send to Google Analytics if configured
         ga_measurement_id = os.environ.get("GA_MEASUREMENT_ID")
         ga_api_secret = os.environ.get("GA_API_SECRET")
-        ga_endpoint = os.environ.get("GA_ENDPOINT_URL")
         if ga_measurement_id and ga_api_secret and not is_placeholder_value(ga_measurement_id) and not is_placeholder_value(ga_api_secret):
             total_services += 1
             try:
@@ -89,7 +90,6 @@ def process_notification(notification):
         
         # Send to Amplitude if configured
         amplitude_api_key = os.environ.get("AMPLITUDE_API_KEY")
-        amplitude_endpoint = os.environ.get("AMPLITUDE_TRACKING_URL")
         if amplitude_api_key and not is_placeholder_value(amplitude_api_key):
             total_services += 1
             try:
@@ -163,85 +163,78 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
         try:
             logger.info(f"Sending request with headers: {headers}")
             
-            # Set a longer timeout to prevent quick disconnections
-            # Use the session instead of requests directly
-            with session.get(notification_url, headers=headers, stream=True, timeout=60) as response:
-                # Check if the connection was successful
-                if response.status_code != 200:
-                    logger.error(f"Server response: {response.status_code} {response.reason}")
-                    logger.error(f"Response content: {response.text[:500]}")  # Log first 500 chars of response
-                    raise Exception(f"Failed to connect to SSE endpoint: {response.status_code} {response.reason}")
+            # Use the session to make the request, then pass the response to SSEClient
+            response = session.get(notification_url, headers=headers, stream=True, timeout=60)
+            
+            # Check if the connection was successful
+            if response.status_code != 200:
+                logger.error(f"Server response: {response.status_code} {response.reason}")
+                logger.error(f"Response content: {response.text[:500]}")  # Log first 500 chars of response
+                raise Exception(f"Failed to connect to SSE endpoint: {response.status_code} {response.reason}")
                 
-                # Reset retry counter after successful connection
-                retry_count = 0
-                logger.info("Successfully connected to Optimizely Agent")
-                logger.info("Waiting for events...")
-                
-                # Variables for heartbeat detection
+            # Create SSEClient with the response object
+            client = sseclient.SSEClient(response)
+            
+            # Reset retry counter after successful connection
+            retry_count = 0
+            logger.info("Successfully connected to Optimizely Agent")
+            logger.info("Waiting for events...")
+            
+            # Variables for heartbeat detection
+            last_activity_time = time.time()
+            heartbeat_interval = 30  # seconds
+            
+            # Process events from the SSE client
+            for event in client.events():
+                # Update last activity time
                 last_activity_time = time.time()
-                heartbeat_interval = 30  # seconds
                 
-                # Manual processing of the SSE stream
-                buffer = ""
-                for line in response.iter_lines(decode_unicode=True):
-                    # Update last activity time
-                    last_activity_time = time.time()
+                if event.data:
+                    logger.debug(f"Received event data: {event.data[:100]}...")  # Log first 100 chars
                     
-                    if line:
-                        logger.debug(f"Received line: {line}")
+                    try:
+                        # Check if this is a decide API event
+                        if "decide" in event.data.lower() or "variationKey" in event.data:
+                            logger.info("Detected a decide API event!")
                         
-                        # If this is a data line, process it
-                        if line.startswith("data:"):
-                            data = line[5:].strip()  # Remove "data:" prefix
-                            logger.info(f"Received data: {data[:100]}...")  # Log first 100 chars
-                            
-                            try:
-                                # Check if this is a decide API event
-                                if "decide" in data.lower() or "variationKey" in data:
-                                    logger.info("Detected a decide API event!")
-                                
-                                # Create a simple message object with a data attribute
-                                class Message:
-                                    def __init__(self, data):
-                                        self.data = data
-                                
-                                msg = Message(data)
-                                process_notification(msg)
-                            except Exception as e:
-                                logger.error(f"Error processing notification: {str(e)}")
-                    elif line == "":
-                        # Empty line might be a heartbeat or keep-alive
-                        logger.debug("Received empty line (possible heartbeat)")
-                    
-                    # Check for heartbeat timeout
-                    current_time = time.time()
-                    if current_time - last_activity_time > heartbeat_interval:
-                        logger.warning(f"No activity for {heartbeat_interval} seconds, checking connection...")
-                        # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
-                        try:
-                            # Extract base URL for health check
-                            base_url = agent_url.split('/v1/')[0]
-                            health_url = f"{base_url}/health"
-                            logger.info(f"Sending ping to health endpoint: {health_url}")
-                            ping_response = requests.get(health_url, timeout=5)
-                            logger.info(f"Health ping response: {ping_response.status_code}")
-                            # Reset last activity time
-                            last_activity_time = time.time()
-                        except Exception as ping_error:
-                            logger.error(f"Error sending health ping: {str(ping_error)}")
-                            # Force a reconnection
-                            raise Exception("Connection inactive, forcing reconnection")
+                        # Process the notification - the event object already has a data attribute
+                        # which is what process_notification expects
+                        process_notification(event)
+                    except Exception as e:
+                        logger.error(f"Error processing notification: {str(e)}")
+                else:
+                    # Empty data might be a heartbeat or keep-alive
+                    logger.debug("Received event with empty data (possible heartbeat)")
+                
+                # Check for heartbeat timeout
+                current_time = time.time()
+                if current_time - last_activity_time > heartbeat_interval:
+                    logger.warning(f"No activity for {heartbeat_interval} seconds, checking connection...")
+                    # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
+                    try:
+                        # Extract base URL for health check
+                        base_url = agent_url.split('/v1/')[0]
+                        health_url = f"{base_url}/health"
+                        logger.info(f"Sending ping to health endpoint: {health_url}")
+                        ping_response = requests.get(health_url, timeout=5)
+                        logger.info(f"Health ping response: {ping_response.status_code}")
+                        # Reset last activity time
+                        last_activity_time = time.time()
+                    except Exception as ping_error:
+                        logger.error(f"Error sending health ping: {str(ping_error)}")
+                        # Force a reconnection
+                        raise Exception("Connection inactive, forcing reconnection")
         
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt. Shutting down...")
             break
             
-        except requests.exceptions.ChunkedEncodingError as e:
+        except (requests.exceptions.ChunkedEncodingError, ValueError) as e:
             retry_count += 1
-            logger.error(f"Connection error (retry {retry_count}/{max_retries}): {str(e)}")
+            logger.error(f"SSE client error (retry {retry_count}/{max_retries}): {str(e)}")
             logger.info("This is likely due to the server closing the connection unexpectedly.")
             
-            # Shorter wait time for ChunkedEncodingError as it's usually temporary
+            # Shorter wait time for SSE client errors as it's usually temporary
             wait_time = 2 * retry_count
             logger.info(f"Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
