@@ -3,12 +3,6 @@
 Amplitude Integration Module
 ---------------------------
 This module handles sending Optimizely Agent notification data to Amplitude.
-
-This module provides functionality to:
-1. Transform Optimizely notification data into Amplitude-compatible format
-2. Send events to Amplitude's HTTP V2 API
-3. Support event deduplication via insert_id
-4. Handle different Optimizely notification types (decision, track, etc.)
 """
 
 import os
@@ -390,6 +384,7 @@ if __name__ == "__main__":
     logger.info("Running Amplitude integration module test")
     
     # Sample Optimizely decision notification (feature flag)
+    # TODO: Check the shapes of these events
     decision_notification = {
         "type": "decision",
         "userId": "test-user-123",
