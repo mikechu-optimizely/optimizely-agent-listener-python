@@ -10,7 +10,7 @@ import logging
 import requests
 import hashlib
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from datetime import datetime
 
 # Set up logging
@@ -67,6 +67,62 @@ def extract_user_id(event_data: Dict[str, Any]) -> str:
     return "anonymous"
 
 
+def extract_notification_specific_data(event_data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Extract notification type-specific data from Optimizely event data.
+    
+    This helper function centralizes the logic for extracting data based on notification type,
+    which is used in multiple places throughout the module.
+    
+    Args:
+        event_data: The notification event data from Optimizely
+        
+    Returns:
+        Tuple containing (notification_type, extracted_data_dict)
+    """
+    notification_type = event_data.get("type", "unknown")
+    extracted_data = {}
+    
+    if notification_type == "decision" and "decision" in event_data:
+        decision = event_data["decision"]
+        extracted_data = {
+            "feature_key": decision.get("featureKey", ""),
+            "rule_key": decision.get("ruleKey", ""),
+            "variation_key": decision.get("variationKey", ""),
+        }
+        
+        # Add variables if available
+        if "variables" in decision and decision["variables"]:
+            extracted_data["variables"] = decision["variables"]
+            
+    elif notification_type == "track":
+        extracted_data = {
+            "event_key": event_data.get("eventKey", ""),
+        }
+        
+        # Add event tags if available
+        if "eventTags" in event_data and event_data["eventTags"]:
+            extracted_data.update(event_data["eventTags"])
+    
+    return notification_type, extracted_data
+
+
+def extract_user_properties(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract user properties from Optimizely event data.
+    
+    Args:
+        event_data: The notification event data from Optimizely
+        
+    Returns:
+        Dictionary of user properties
+    """
+    user_properties = {}
+    if "userContext" in event_data and "attributes" in event_data["userContext"]:
+        user_properties = event_data["userContext"]["attributes"]
+    return user_properties
+
+
 def generate_insert_id(event_data: Dict[str, Any]) -> str:
     """
     Generate a deterministic insert_id for event deduplication.
@@ -81,7 +137,7 @@ def generate_insert_id(event_data: Dict[str, Any]) -> str:
         A unique hash string to use as insert_id
     """
     # Extract key identifying information
-    notification_type = event_data.get("type", "unknown")
+    notification_type, type_specific_data = extract_notification_specific_data(event_data)
     user_id = extract_user_id(event_data)
     
     # Create a dictionary of key fields that identify this specific event
@@ -92,18 +148,17 @@ def generate_insert_id(event_data: Dict[str, Any]) -> str:
     }
     
     # Add type-specific identifiers
-    if notification_type == "decision":
-        if "decision" in event_data:
-            decision = event_data["decision"]
+    if type_specific_data:
+        if notification_type == "decision":
             dedup_data.update({
-                "feature_key": decision.get("featureKey", ""),
-                "rule_key": decision.get("ruleKey", ""),
-                "variation_key": decision.get("variationKey", ""),
+                "feature_key": type_specific_data.get("feature_key", ""),
+                "rule_key": type_specific_data.get("rule_key", ""),
+                "variation_key": type_specific_data.get("variation_key", ""),
             })
-    elif notification_type == "track":
-        dedup_data.update({
-            "event_key": event_data.get("eventKey", ""),
-        })
+        elif notification_type == "track":
+            dedup_data.update({
+                "event_key": type_specific_data.get("event_key", ""),
+            })
     
     # Generate a stable hash of this data
     hash_input = json.dumps(dedup_data, sort_keys=True).encode()
@@ -120,48 +175,16 @@ def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict containing transformed data for Amplitude
     """
-    # Get notification type
-    notification_type = event_data.get("type", "unknown")
-
-    # Extract user ID from the appropriate location in the event data
+    # Extract common data using our helper functions
+    notification_type, type_specific_data = extract_notification_specific_data(event_data)
     user_id = extract_user_id(event_data)
-
-    # Add user properties if available
-    user_properties = {}
-    if "userContext" in event_data and "attributes" in event_data["userContext"]:
-        user_properties = event_data["userContext"]["attributes"]
-
+    user_properties = extract_user_properties(event_data)
+    
     # Base event properties
     event_properties = {
         "notification_type": notification_type,
+        **type_specific_data  # Spread the type-specific data into event properties
     }
-
-    # Handle different notification types
-    if notification_type == "decision":
-        if "decision" in event_data:
-            decision = event_data["decision"]
-            event_properties.update(
-                {
-                    "feature_key": decision.get("featureKey", ""),
-                    "rule_key": decision.get("ruleKey", ""),
-                    "variation_key": decision.get("variationKey", ""),
-                }
-            )
-
-            # Add variables if available
-            if "variables" in decision and decision["variables"]:
-                event_properties["variables"] = decision["variables"]
-
-    elif notification_type == "track":
-        event_properties.update(
-            {
-                "event_key": event_data.get("eventKey", ""),
-            }
-        )
-
-        # Add event tags if available
-        if "eventTags" in event_data and event_data["eventTags"]:
-            event_properties.update(event_data["eventTags"])
 
     # Generate an insert_id for event deduplication
     insert_id = generate_insert_id(event_data)
