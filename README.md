@@ -42,14 +42,16 @@ The application is configured using environment variables:
 Before running the notification listener, you need to have an instance of Optimizely Agent running. The easiest way to do this is using Docker:
 
 ```bash
-docker run -d -p 8080:8080 -p 8085:8085 -p 8088:8088 -e OPTIMIZELY_LOG_PRETTY=true -e OPTIMIZELY_SERVER_HOST=0.0.0.0 -e OPTIMIZELY_SERVER_ALLOWEDHOSTS=localhost,127.0.0.1 --rm optimizely/agent
+docker run -d -p 8080:8080 -p 8085:8085 -p 8088:8088 -e OPTIMIZELY_LOG_PRETTY=true -e OPTIMIZELY_SERVER_HOST=0.0.0.0 -e OPTIMIZELY_SERVER_ALLOWEDHOSTS=localhost,127.0.0.1 -e OPTIMIZELY_API_ENABLENOTIFICATIONS=1 --rm optimizely/agent
 ```
 
 This command:
 - Runs the Optimizely Agent container in detached mode
 - Maps the necessary ports (8080, 8085, 8088) to your local machine
 - Configures the agent to accept requests from localhost
+- Enables the notification stream (required for the notification listener)
 - Automatically removes the container when it stops
+- Remove the `-d` flag to run the container in the foreground (for debugging)
 
 You can verify the agent is running correctly by accessing the configuration endpoint:
 

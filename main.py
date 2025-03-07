@@ -10,7 +10,6 @@ import json
 import os
 import sys
 import logging
-from sseclient import SSEClient
 from urllib.parse import urljoin
 import time
 from pathlib import Path
@@ -96,6 +95,7 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
     headers = {"X-Optimizely-Sdk-Key": sdk_key, "Accept": "text/event-stream"}
 
     logger.info(f"Connecting to SSE endpoint: {notification_url}")
+    logger.info(f"Using SDK key: {sdk_key}")
 
     retry_count = 0
     max_retries = 10
@@ -104,18 +104,49 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
 
     while retry_count < max_retries:
         try:
-            # Connect to the SSE stream
-            messages = SSEClient(notification_url, headers=headers)
-
+            # Connect to the SSE stream using requests directly
+            import requests
+            logger.info(f"Sending request with headers: {headers}")
+            response = requests.get(notification_url, headers=headers, stream=True)
+            
+            # Check if the connection was successful
+            if response.status_code != 200:
+                logger.error(f"Server response: {response.status_code} {response.reason}")
+                logger.error(f"Response content: {response.text[:500]}")  # Log first 500 chars of response
+                raise Exception(f"Failed to connect to SSE endpoint: {response.status_code} {response.reason}")
+            
             # Reset retry counter after successful connection
             retry_count = 0
             logger.info("Successfully connected to Optimizely Agent")
+            
+            # Process the SSE stream manually
+            buffer = ""
+            for line in response.iter_lines(decode_unicode=True):
+                if line:
+                    # Add the line to the buffer
+                    buffer += line + "\n"
+                    
+                    # If we've reached the end of an event (empty line), process it
+                    if line == "":
+                        if "data:" in buffer:
+                            # Extract the data part
+                            data_parts = [part for part in buffer.split("\n") if part.startswith("data:")]
+                            if data_parts:
+                                data = data_parts[0].replace("data:", "").strip()
+                                # Create a simple message object with a data attribute
+                                class Message:
+                                    def __init__(self, data):
+                                        self.data = data
+                                
+                                msg = Message(data)
+                                process_notification(msg)
+                        
+                        # Reset the buffer for the next event
+                        buffer = ""
 
-            # Process each notification
-            for msg in messages:
-                if msg.data:
-                    process_notification(msg)
-
+        except KeyboardInterrupt:
+            logger.info("Received keyboard interrupt. Shutting down...")
+            break
         except Exception as e:
             retry_count += 1
             logger.error(
