@@ -19,6 +19,12 @@ from pathlib import Path
 from google_analytics import send_to_google_analytics
 from amplitude import send_to_amplitude
 
+# Set up logging first, so we can log any issues with environment loading
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 # Try to load environment variables from .env file if it exists (for local development)
 env_path = Path(".") / ".env"
 if env_path.exists():
@@ -26,17 +32,11 @@ if env_path.exists():
         from dotenv import load_dotenv
 
         load_dotenv()
-        print("Loaded environment variables from .env file")
+        logger.info("Loaded environment variables from .env file")
     except ImportError:
-        print(
+        logger.warning(
             "dotenv package not installed. Install it with: pip install python-dotenv"
         )
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
 
 
 def process_notification(notification):
@@ -100,6 +100,7 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
     retry_count = 0
     max_retries = 10
     retry_delay = 5  # seconds
+    backoff_factor = 2  # For exponential backoff
 
     while retry_count < max_retries:
         try:
@@ -108,6 +109,7 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
 
             # Reset retry counter after successful connection
             retry_count = 0
+            logger.info("Successfully connected to Optimizely Agent")
 
             # Process each notification
             for msg in messages:
@@ -121,8 +123,10 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
             )
 
             if retry_count < max_retries:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
+                # Use exponential backoff for retries
+                current_delay = retry_delay * (backoff_factor ** (retry_count - 1))
+                logger.info(f"Retrying in {current_delay} seconds...")
+                time.sleep(current_delay)
             else:
                 logger.error("Max retries reached. Exiting notification listener.")
                 break
@@ -170,6 +174,13 @@ def main():
     if not sdk_key or is_placeholder_value(sdk_key):
         logger.error(
             "OPTIMIZELY_SDK_KEY environment variable is required and cannot be a placeholder value"
+        )
+        sys.exit(1)
+
+    # Validate agent URL format
+    if not agent_url.startswith(("http://", "https://")):
+        logger.error(
+            f"Invalid OPTIMIZELY_AGENT_URL format: {agent_url}. URL must start with http:// or https://"
         )
         sys.exit(1)
 
@@ -226,8 +237,14 @@ def main():
     else:
         logger.info("No notification filter set - listening for all notification types")
 
-    # Start the notification listener in the main thread
-    listen_for_notifications(sdk_key, agent_url, filter_type)
+    try:
+        # Start the notification listener in the main thread
+        listen_for_notifications(sdk_key, agent_url, filter_type)
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt. Shutting down...")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
