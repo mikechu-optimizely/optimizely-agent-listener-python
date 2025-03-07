@@ -127,6 +127,12 @@ def main():
     logger.info("Starting Optimizely notification listener")
     logger.info(f"Agent URL: {agent_url}")
     
+    if filter_type:
+        logger.info(f"Notification filter: {filter_type}")
+        logger.info("Only listening for the following notification types: " + filter_type)
+    else:
+        logger.info("No notification filter set - listening for all notification types")
+    
     # Start the notification listener in the main thread
     listen_for_notifications(sdk_key, agent_url, filter_type)
 
