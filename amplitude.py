@@ -8,6 +8,8 @@ This module handles sending Optimizely Agent notification data to Amplitude.
 import os
 import logging
 import requests
+import hashlib
+import json
 from typing import Dict, Any
 from datetime import datetime
 
@@ -65,6 +67,49 @@ def extract_user_id(event_data: Dict[str, Any]) -> str:
     return "anonymous"
 
 
+def generate_insert_id(event_data: Dict[str, Any]) -> str:
+    """
+    Generate a deterministic insert_id for event deduplication.
+    
+    The insert_id is a hash of key event data that uniquely identifies this event,
+    ensuring that if the same event is sent multiple times, Amplitude will only count it once.
+    
+    Args:
+        event_data: The notification event data from Optimizely
+        
+    Returns:
+        A unique hash string to use as insert_id
+    """
+    # Extract key identifying information
+    notification_type = event_data.get("type", "unknown")
+    user_id = extract_user_id(event_data)
+    
+    # Create a dictionary of key fields that identify this specific event
+    dedup_data = {
+        "type": notification_type,
+        "user_id": user_id,
+        "timestamp": event_data.get("timestamp", ""),
+    }
+    
+    # Add type-specific identifiers
+    if notification_type == "decision":
+        if "decision" in event_data:
+            decision = event_data["decision"]
+            dedup_data.update({
+                "feature_key": decision.get("featureKey", ""),
+                "rule_key": decision.get("ruleKey", ""),
+                "variation_key": decision.get("variationKey", ""),
+            })
+    elif notification_type == "track":
+        dedup_data.update({
+            "event_key": event_data.get("eventKey", ""),
+        })
+    
+    # Generate a stable hash of this data
+    hash_input = json.dumps(dedup_data, sort_keys=True).encode()
+    return hashlib.md5(hash_input).hexdigest()
+
+
 def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Transform Optimizely notification data into a format suitable for Amplitude.
@@ -118,6 +163,9 @@ def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
         if "eventTags" in event_data and event_data["eventTags"]:
             event_properties.update(event_data["eventTags"])
 
+    # Generate an insert_id for event deduplication
+    insert_id = generate_insert_id(event_data)
+
     # Final Amplitude event format
     amplitude_event = {
         "event_type": f"optimizely_{notification_type}",
@@ -125,12 +173,13 @@ def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
         "user_properties": user_properties,
         "event_properties": event_properties,
         "time": int(datetime.now().timestamp() * 1000),  # Current time in milliseconds
+        "insert_id": insert_id,  # Add insert_id for deduplication
         # Add additional Body Parameters if needed
         # https://amplitude.com/docs/apis/analytics/http-v2#body-parameters
     }
 
-    # Log the user ID being sent
-    logger.debug(f"Sending to Amplitude with user_id: {user_id}")
+    # Log the user ID and insert_id being sent
+    logger.debug(f"Sending to Amplitude with user_id: {user_id}, insert_id: {insert_id}")
 
     return amplitude_event
 
