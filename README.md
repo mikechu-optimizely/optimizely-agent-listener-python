@@ -38,28 +38,47 @@ The application is configured using environment variables:
 
 ## Running Locally (Outside Container)
 
-For local development, you can run the notification center directly on your machine:
+For local development, you can run the notification center directly on your machine using a virtual environment:
 
-1. Copy the sample environment file to create your local configuration:
+1. Create a virtual environment:
 
 ```bash
-cp .env.sample .env
+# On Windows
+python -m venv venv
+
+# On macOS/Linux
+python3 -m venv venv
 ```
 
-2. Edit the `.env` file with your actual configuration values.
+2. Activate the virtual environment:
+
+```bash
+# On Windows
+venv\Scripts\activate
+
+# On macOS/Linux
+source venv/bin/activate
+```
 
 3. Install the required dependencies:
 
 ```bash
-# Using pip
 pip install -r requirements.txt
-
-# OR using uv (recommended for faster installation)
-pip install uv
-uv pip install -r requirements.txt
 ```
 
-4. Run the notification center:
+4. Copy the sample environment file to create your local configuration:
+
+```bash
+# On Windows
+copy .env.sample .env
+
+# On macOS/Linux
+cp .env.sample .env
+```
+
+5. Edit the `.env` file with your actual configuration values.
+
+6. Run the notification center:
 
 ```bash
 python main.py

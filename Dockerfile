@@ -8,14 +8,11 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install uv
-RUN pip install --no-cache-dir uv
-
 # Copy requirements file
 COPY requirements.txt .
 
-# Install dependencies using uv
-RUN uv pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application code
 COPY main.py google_analytics.py amplitude.py ./
