@@ -8,10 +8,12 @@ services:
       - "8085:8085"
       - "8088:8088"
     environment:
+    # https://docs.developers.optimizely.com/feature-experimentation/docs/configure-optimizely-agent
       - OPTIMIZELY_LOG_PRETTY=true
       - OPTIMIZELY_SERVER_HOST=0.0.0.0
       - OPTIMIZELY_SERVER_ALLOWEDHOSTS=0.0.0.0
       - OPTIMIZELY_API_ENABLENOTIFICATIONS=1
+      - OPTIMIZELY_SDKKEYS=${OPTIMIZELY_SDK_KEYS}
     networks:
       - default
 
