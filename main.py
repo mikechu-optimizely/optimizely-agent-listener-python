@@ -12,11 +12,14 @@ import sys
 import logging
 from urllib.parse import urljoin
 import time
+import asyncio
 from pathlib import Path
 from google_analytics import send_to_google_analytics
 from amplitude import send_to_amplitude
 import sseclient
 import requests
+import aiohttp
+from aiohttp_sse_client import client as sse_client
 
 # Set up logging first, so we can log any issues with environment loading
 logging.basicConfig(
@@ -38,7 +41,7 @@ if env_path.exists():
         )
 
 
-def process_notification(notification):
+async def process_notification(notification):
     """
     Process a notification from the Optimizely Agent.
     
@@ -81,7 +84,8 @@ def process_notification(notification):
         if ga_measurement_id and ga_api_secret and not is_placeholder_value(ga_measurement_id) and not is_placeholder_value(ga_api_secret):
             total_services += 1
             try:
-                result = send_to_google_analytics(event_data)
+                # Create a task for sending to Google Analytics
+                result = await send_to_google_analytics(event_data)
                 if result:
                     success_count += 1
                     logger.debug(f"Successfully sent to Google Analytics: {notification_type}")
@@ -93,7 +97,8 @@ def process_notification(notification):
         if amplitude_api_key and not is_placeholder_value(amplitude_api_key):
             total_services += 1
             try:
-                result = send_to_amplitude(event_data)
+                # Create a task for sending to Amplitude
+                result = await send_to_amplitude(event_data)
                 if result:
                     success_count += 1
                     logger.debug(f"Successfully sent to Amplitude: {notification_type}")
@@ -112,9 +117,9 @@ def process_notification(notification):
         return False
 
 
-def listen_for_notifications(sdk_key, agent_url, filter_type=None):
+async def listen_for_notifications(sdk_key, agent_url, filter_type=None):
     """
-    Listen for notifications from the Optimizely Agent.
+    Listen for notifications from the Optimizely Agent using async SSE client.
     
     Args:
         sdk_key: The Optimizely SDK key
@@ -144,143 +149,112 @@ def listen_for_notifications(sdk_key, agent_url, filter_type=None):
     retry_count = 0
     max_retries = 10
     
-    # Configure session with retry capabilities
-    session = requests.Session()
-    
-    # Set up adapter with keep-alive settings
-    adapter = requests.adapters.HTTPAdapter(
-        max_retries=3,  # Retry 3 times for failed requests
-        pool_connections=1,  # Use a single connection
-        pool_maxsize=1,  # Maximum size of the connection pool
-        pool_block=False  # Don't block when pool is full
-    )
-    
-    # Mount the adapter for both http and https
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    
-    while retry_count < max_retries:
-        try:
-            logger.info(f"Sending request with headers: {headers}")
-            
-            # Use the session to make the request, then pass the response to SSEClient
-            response = session.get(notification_url, headers=headers, stream=True, timeout=60)
-            
-            # Check if the connection was successful
-            if response.status_code != 200:
-                logger.error(f"Server response: {response.status_code} {response.reason}")
-                logger.error(f"Response content: {response.text[:500]}")  # Log first 500 chars of response
-                raise Exception(f"Failed to connect to SSE endpoint: {response.status_code} {response.reason}")
-                
-            # Create SSEClient with the response object
-            client = sseclient.SSEClient(response)
-            
-            # Reset retry counter after successful connection
-            retry_count = 0
-            logger.info("Successfully connected to Optimizely Agent")
-            logger.info("Waiting for events...")
-            
-            # Variables for heartbeat detection
-            last_activity_time = time.time()
-            heartbeat_interval = 30  # seconds
-            
-            # Process events from the SSE client
-            for event in client.events():
-                # Update last activity time
-                last_activity_time = time.time()
-                
-                if event.data:
-                    logger.debug(f"Received event data: {event.data[:100]}...")  # Log first 100 chars
-                    
-                    try:
-                        # Check if this is a decide API event
-                        if "decide" in event.data.lower() or "variationKey" in event.data:
-                            logger.info("Detected a decide API event!")
-                        
-                        # Process the notification - the event object already has a data attribute
-                        # which is what process_notification expects
-                        process_notification(event)
-                    except Exception as e:
-                        logger.error(f"Error processing notification: {str(e)}")
-                else:
-                    # Empty data might be a heartbeat or keep-alive
-                    logger.debug("Received event with empty data (possible heartbeat)")
-                
-                # Check for heartbeat timeout
-                current_time = time.time()
-                if current_time - last_activity_time > heartbeat_interval:
-                    logger.warning(f"No activity for {heartbeat_interval} seconds, checking connection...")
-                    # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
-                    try:
-                        # Extract base URL for health check
-                        base_url = agent_url.split('/v1/')[0]
-                        health_url = f"{base_url}/health"
-                        logger.info(f"Sending ping to health endpoint: {health_url}")
-                        ping_response = requests.get(health_url, timeout=5)
-                        logger.info(f"Health ping response: {ping_response.status_code}")
-                        # Reset last activity time
-                        last_activity_time = time.time()
-                    except Exception as ping_error:
-                        logger.error(f"Error sending health ping: {str(ping_error)}")
-                        # Force a reconnection
-                        raise Exception("Connection inactive, forcing reconnection")
+    # Create a ClientSession that will be used for all requests
+    async with aiohttp.ClientSession() as session:
+        # Setup heartbeat detection
+        last_activity_time = time.time()
+        heartbeat_interval = 2  # seconds
         
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt. Shutting down...")
-            break
-            
-        except (requests.exceptions.ChunkedEncodingError, ValueError) as e:
-            retry_count += 1
-            logger.error(f"SSE client error (retry {retry_count}/{max_retries}): {str(e)}")
-            logger.info("This is likely due to the server closing the connection unexpectedly.")
-            
-            # Shorter wait time for SSE client errors as it's usually temporary
-            wait_time = 2 * retry_count
-            logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-            
-        except (requests.exceptions.ConnectionError, ConnectionResetError) as e:
-            retry_count += 1
-            logger.error(f"Connection error (retry {retry_count}/{max_retries}): {str(e)}")
-            logger.info("The Optimizely Agent closed the connection. This is normal behavior after periods of inactivity.")
-            
-            # Check if the Agent is still running
+        while retry_count < max_retries:
             try:
-                # Extract base URL for health check
-                base_url = agent_url.split('/v1/')[0]
-                health_url = f"{base_url}/health"
-                logger.info(f"Checking if Optimizely Agent is still running: {health_url}")
-                health_response = requests.get(health_url, timeout=5)
-                logger.info(f"Agent health check response: {health_response.status_code}")
+                logger.info(f"Sending request with headers: {headers}")
                 
-                if health_response.status_code == 200:
-                    logger.info("Optimizely Agent is still running. Will reconnect.")
-                else:
-                    logger.error("Optimizely Agent health check failed. Agent may be down.")
-            except Exception as health_error:
-                logger.error(f"Error checking Agent health: {str(health_error)}")
+                # Connect to the SSE endpoint using aiohttp-sse-client
+                async with sse_client.EventSource(notification_url, headers=headers, session=session, timeout=60) as event_source:
+                    # Reset retry counter after successful connection
+                    retry_count = 0
+                    logger.info("Successfully connected to Optimizely Agent")
+                    logger.info("Waiting for events...")
+                    
+                    # Process events as they arrive
+                    async for event in event_source:
+                        # Update last activity time
+                        last_activity_time = time.time()
+                        
+                        if event.data:
+                            logger.debug(f"Received event data: {event.data[:100]}...")  # Log first 100 chars
+                            
+                            try:
+                                # Check if this is a decide API event
+                                if "decide" in event.data.lower() or "variationKey" in event.data:
+                                    logger.info("Detected a decide API event!")
+                                
+                                # Process the notification - the event object already has a data attribute
+                                # which is what process_notification expects
+                                await process_notification(event)
+                            except Exception as e:
+                                logger.error(f"Error processing notification: {str(e)}")
+                        else:
+                            # Empty data might be a heartbeat or keep-alive
+                            logger.debug("Received event with empty data (possible heartbeat)")
+                        
+                        # Check for heartbeat timeout
+                        current_time = time.time()
+                        if current_time - last_activity_time > heartbeat_interval:
+                            logger.warning(f"No activity for {heartbeat_interval} seconds, checking connection...")
+                            # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
+                            try:
+                                # Extract base URL for health check
+                                base_url = agent_url.split('/v1/')[0]
+                                health_url = f"{base_url}/health"
+                                logger.info(f"Sending ping to health endpoint: {health_url}")
+                                
+                                # Use the session to make the request
+                                async with session.get(health_url, timeout=5) as response:
+                                    logger.info(f"Health ping response: {response.status}")
+                                
+                                # Reset last activity time
+                                last_activity_time = time.time()
+                            except Exception as ping_error:
+                                logger.error(f"Error sending health ping: {str(ping_error)}")
+                                # Force a reconnection
+                                raise Exception("Connection inactive, forcing reconnection")
             
-            # Shorter wait time for connection errors as we want to reconnect quickly
-            wait_time = 3 * retry_count
-            logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-            
-        except Exception as e:
-            retry_count += 1
-            logger.error(f"Connection error (retry {retry_count}/{max_retries}): {str(e)}")
-            
-            # Exponential backoff for retries
-            wait_time = 5 * retry_count
-            logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-            
-    logger.error("Max retries exceeded. Exiting.")
+            except asyncio.CancelledError:
+                logger.info("Async task was cancelled. Shutting down...")
+                break
+                
+            except (aiohttp.ClientError, aiohttp.ClientPayloadError, aiohttp.ClientResponseError) as e:
+                retry_count += 1
+                logger.error(f"SSE client error (retry {retry_count}/{max_retries}): {str(e)}")
+                logger.info("This is likely due to the server closing the connection unexpectedly.")
+                
+                # Shorter wait time for SSE client errors as it's usually temporary
+                wait_time = 2 * retry_count
+                logger.info(f"Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+                
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Connection error (retry {retry_count}/{max_retries}): {str(e)}")
+                
+                # Check if the Agent is still running
+                try:
+                    # Extract base URL for health check
+                    base_url = agent_url.split('/v1/')[0]
+                    health_url = f"{base_url}/health"
+                    logger.info(f"Checking if Optimizely Agent is still running: {health_url}")
+                    
+                    async with session.get(health_url, timeout=5) as response:
+                        logger.info(f"Agent health check response: {response.status}")
+                        
+                        if response.status == 200:
+                            logger.info("Optimizely Agent is still running. Will reconnect.")
+                        else:
+                            logger.error("Optimizely Agent health check failed. Agent may be down.")
+                except Exception as health_error:
+                    logger.error(f"Error checking Agent health: {str(health_error)}")
+                
+                # Exponential backoff for retries
+                wait_time = 5 * retry_count
+                logger.info(f"Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+                
+        logger.error("Max retries exceeded. Exiting.")
 
 
-def test_agent_connection(sdk_key, agent_base_url):
+async def test_agent_connection(sdk_key, agent_base_url):
     """Test the connection to the Optimizely Agent by checking its health endpoint."""
-    import requests
-    
     # Extract the base URL (remove the notification path)
     base_url = agent_base_url.split('/v1/')[0]
     health_url = f"{base_url}/health"
@@ -288,30 +262,35 @@ def test_agent_connection(sdk_key, agent_base_url):
     logger.info(f"Testing connection to Optimizely Agent health endpoint: {health_url}")
     
     try:
-        response = requests.get(health_url)
-        logger.info(f"Health endpoint response: {response.status_code} {response.reason}")
-        logger.info(f"Response content: {response.text[:500]}")
-        
-        if response.status_code == 200:
-            logger.info("Optimizely Agent is healthy!")
-            
-            # Now test the configuration endpoint
-            config_url = f"{base_url}/v1/config"
-            headers = {"X-Optimizely-Sdk-Key": sdk_key}
-            
-            logger.info(f"Testing configuration endpoint: {config_url}")
-            config_response = requests.get(config_url, headers=headers)
-            
-            logger.info(f"Config endpoint response: {config_response.status_code} {config_response.reason}")
-            if config_response.status_code == 200:
-                logger.info("Successfully retrieved configuration!")
-                return True
-            else:
-                logger.error(f"Failed to retrieve configuration: {config_response.text[:500]}")
-                return False
-        else:
-            logger.error("Optimizely Agent health check failed!")
-            return False
+        async with aiohttp.ClientSession() as session:
+            # Test the health endpoint
+            async with session.get(health_url) as response:
+                logger.info(f"Health endpoint response: {response.status} {response.reason}")
+                
+                if response.status == 200:
+                    response_text = await response.text()
+                    logger.info(f"Response content: {response_text[:500]}")
+                    logger.info("Optimizely Agent is healthy!")
+                    
+                    # Now test the configuration endpoint
+                    config_url = f"{base_url}/v1/config"
+                    headers = {"X-Optimizely-Sdk-Key": sdk_key}
+                    
+                    logger.info(f"Testing configuration endpoint: {config_url}")
+                    
+                    async with session.get(config_url, headers=headers) as config_response:
+                        logger.info(f"Config endpoint response: {config_response.status} {config_response.reason}")
+                        
+                        if config_response.status == 200:
+                            logger.info("Successfully retrieved configuration!")
+                            return True
+                        else:
+                            config_text = await config_response.text()
+                            logger.error(f"Failed to retrieve configuration: {config_text[:500]}")
+                            return False
+                else:
+                    logger.error("Optimizely Agent health check failed!")
+                    return False
             
     except Exception as e:
         logger.error(f"Error connecting to Optimizely Agent: {str(e)}")
@@ -345,7 +324,7 @@ def is_placeholder_value(value):
     return any(pattern in value for pattern in placeholder_patterns)
 
 
-def main():
+async def main():
     """
     Main entry point for the notification center.
     """
@@ -402,7 +381,9 @@ def main():
             )
 
     # Check Amplitude configuration
-    amplitude_enabled = amplitude_api_key and not is_placeholder_value(amplitude_api_key)
+    amplitude_enabled = amplitude_api_key and not is_placeholder_value(
+        amplitude_api_key
+    )
     if amplitude_enabled:
         logger.info(
             f"Amplitude tracking enabled (Endpoint: {amplitude_endpoint or 'default'})"
@@ -412,26 +393,29 @@ def main():
             "Amplitude tracking disabled - AMPLITUDE_API_KEY not set or contains placeholder value"
         )
 
-    # Check if at least one analytics platform is enabled
+    # Warn if no analytics platforms are configured
     if not ga_enabled and not amplitude_enabled:
         logger.warning(
             "No analytics platforms are properly configured. Events will be received but not forwarded."
         )
 
-    # Test the Optimizely Agent connection
-    if not test_agent_connection(sdk_key, agent_url):
-        logger.error("Optimizely Agent connection test failed. Exiting.")
+    # Test the connection to the Optimizely Agent before starting
+    connection_ok = await test_agent_connection(sdk_key, agent_url)
+    if not connection_ok:
+        logger.error("Failed to connect to Optimizely Agent. Exiting.")
         sys.exit(1)
 
     try:
-        # Start the notification listener in the main thread
-        listen_for_notifications(sdk_key, agent_url, filter_type)
+        # Start listening for notifications
+        await listen_for_notifications(sdk_key, agent_url, filter_type)
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt. Shutting down...")
+        sys.exit(0)
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Error in notification listener: {str(e)}")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    # Run the async main function
+    asyncio.run(main())

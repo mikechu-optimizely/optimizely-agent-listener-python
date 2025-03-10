@@ -7,7 +7,8 @@ This module handles sending Optimizely Agent notification data to Amplitude.
 
 import os
 import logging
-import requests
+import aiohttp
+import asyncio
 import hashlib
 import json
 from typing import Dict, Any, Tuple
@@ -315,9 +316,9 @@ def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
     return amplitude_event
 
 
-def send_to_amplitude(event_data: Dict[str, Any]) -> bool:
+async def send_to_amplitude(event_data: Dict[str, Any]) -> bool:
     """
-    Send Optimizely notification data to Amplitude.
+    Send Optimizely notification data to Amplitude using async HTTP.
 
     Args:
         event_data: The notification event data from Optimizely
@@ -354,43 +355,45 @@ def send_to_amplitude(event_data: Dict[str, Any]) -> bool:
         # Implement retries for resilience
         for attempt in range(MAX_RETRIES):
             try:
-                # Send data to Amplitude with timeout
-                response = requests.post(
-                    config["tracking_url"],
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=REQUEST_TIMEOUT,
-                )
+                # Create a new session for each retry
+                async with aiohttp.ClientSession() as session:
+                    # Send data to Amplitude with timeout
+                    async with session.post(
+                        config["tracking_url"],
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=REQUEST_TIMEOUT,
+                    ) as response:
+                        if response.status == 200:
+                            response_text = await response.text()
+                            response_data = json.loads(response_text)
+                            logger.info(
+                                f"Successfully sent to Amplitude: {amplitude_event['event_type']} - Server response: {response_data}"
+                            )
+                            return True
+                        elif response.status == 429:  # Rate limiting
+                            if attempt < MAX_RETRIES - 1:
+                                # Exponential backoff: 1s, 2s, 4s
+                                backoff = 2**attempt
+                                logger.warning(
+                                    f"Rate limited by Amplitude. Retrying in {backoff}s..."
+                                )
+                                await asyncio.sleep(backoff)
+                                continue
+                            else:
+                                response_text = await response.text()
+                                logger.error(
+                                    f"Failed to send to Amplitude after {MAX_RETRIES} retries: {response.status} - {response_text}"
+                                )
+                                return False
+                        else:
+                            response_text = await response.text()
+                            logger.error(
+                                f"Failed to send to Amplitude: {response.status} - {response_text}"
+                            )
+                            return False
 
-                if response.status_code == 200:
-                    response_data = response.json()
-                    logger.info(
-                        f"Successfully sent to Amplitude: {amplitude_event['event_type']} - Server response: {response_data}"
-                    )
-                    return True
-                elif response.status_code == 429:  # Rate limiting
-                    if attempt < MAX_RETRIES - 1:
-                        # Exponential backoff: 1s, 2s, 4s
-                        import time
-
-                        backoff = 2**attempt
-                        logger.warning(
-                            f"Rate limited by Amplitude. Retrying in {backoff}s..."
-                        )
-                        time.sleep(backoff)
-                        continue
-                    else:
-                        logger.error(
-                            f"Failed to send to Amplitude after {MAX_RETRIES} retries: {response.status_code} - {response.text}"
-                        )
-                        return False
-                else:
-                    logger.error(
-                        f"Failed to send to Amplitude: {response.status_code} - {response.text}"
-                    )
-                    return False
-
-            except requests.exceptions.Timeout:
+            except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES - 1:
                     logger.warning(
                         f"Timeout connecting to Amplitude. Retry {attempt+1}/{MAX_RETRIES}"
@@ -399,7 +402,7 @@ def send_to_amplitude(event_data: Dict[str, Any]) -> bool:
                 else:
                     logger.error("Amplitude request timed out after all retries")
                     return False
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 logger.error(f"Request error sending to Amplitude: {str(e)}")
                 return False
 
@@ -415,7 +418,6 @@ if __name__ == "__main__":
     logger.info("Running Amplitude integration module test")
 
     # Sample Optimizely decision notification (feature flag)
-    # TODO: Check the shapes of these events
     decision_notification = {
         "type": "decision",
         "userId": "test-user-123",
@@ -446,38 +448,25 @@ if __name__ == "__main__":
         "userId": "test-user-123",
         "eventKey": "purchase_completed",
         "eventName": "Purchase Completed",
-        "attributes": {
-            "device": "mobile",
-            "location": "australia",
-            "browser": "chrome",
-        },
-        "experimentIds": ["exp_1", "exp_2"],
-        "eventTags": {
+        "tags": {
             "revenue": 99.99,
             "items": 3,
-            "category": "travel",
-            "destination": "bali",
+            "category": "electronics",
         },
     }
 
-    # Test both notification types
-    logger.info("Testing decision notification...")
-    decision_result = send_to_amplitude(decision_notification)
-    logger.info(
-        f"Decision notification test result: {'Success' if decision_result else 'Failed'}"
-    )
+    # Test sending to Amplitude
+    async def test_amplitude():
+        # Test decision notification
+        result1 = await send_to_amplitude(decision_notification)
+        logger.info(f"Decision notification result: {result1}")
 
-    logger.info("\nTesting track notification...")
-    track_result = send_to_amplitude(track_notification)
-    logger.info(
-        f"Track notification test result: {'Success' if track_result else 'Failed'}"
-    )
+        # Test track notification
+        result2 = await send_to_amplitude(track_notification)
+        logger.info(f"Track notification result: {result2}")
 
-    # Test invalid input
-    logger.info("\nTesting invalid input...")
-    invalid_result = send_to_amplitude("not a dictionary")
-    logger.info(
-        f"Invalid input test result: {'Success' if not invalid_result else 'Failed'}"
-    )
-
-    logger.info("\nAmplitude integration module test completed")
+    # Run the async test
+    if os.environ.get("AMPLITUDE_API_KEY"):
+        asyncio.run(test_amplitude())
+    else:
+        logger.warning("Skipping Amplitude test - API key not set")

@@ -7,7 +7,8 @@ This module handles sending Optimizely Agent notification data to Google Analyti
 
 import os
 import logging
-import requests
+import aiohttp
+import asyncio
 import time
 from typing import Dict, Any
 
@@ -197,9 +198,9 @@ def transform_optimizely_data(event_data: Dict[str, Any]) -> Dict[str, Any]:
     return ga_event
 
 
-def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
+async def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
     """
-    Send Optimizely notification data to Google Analytics.
+    Send Optimizely notification data to Google Analytics using async HTTP.
 
     Args:
         event_data: The notification event data from Optimizely
@@ -255,45 +256,49 @@ def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
         # Implement retries for resilience
         for attempt in range(MAX_RETRIES):
             try:
-                # Send data to GA with timeout
-                response = requests.post(
-                    url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=REQUEST_TIMEOUT,
-                )
+                # Create a new session for each retry
+                async with aiohttp.ClientSession() as session:
+                    # Send data to GA with timeout
+                    async with session.post(
+                        url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=REQUEST_TIMEOUT,
+                    ) as response:
+                        if response.status in (204, 200):
+                            logger.info(
+                                f"Successfully sent to Google Analytics: {ga_event['name']}"
+                            )
 
-                if response.status_code == 204 or response.status_code == 200:
-                    logger.info(
-                        f"Successfully sent to Google Analytics: {ga_event['name']}"
-                    )
+                            # Log response details if available
+                            response_text = await response.text()
+                            if response_text:
+                                logger.debug(f"GA Response: {response_text}")
 
-                    # Log response details if available
-                    if response.text:
-                        logger.debug(f"GA Response: {response.text}")
+                            return True
+                        elif response.status == 429:  # Rate limiting
+                            if attempt < MAX_RETRIES - 1:
+                                # Exponential backoff: 1s, 2s, 4s
+                                backoff = 2**attempt
+                                logger.warning(
+                                    f"Rate limited by Google Analytics. Retrying in {backoff}s..."
+                                )
+                                await asyncio.sleep(backoff)
+                                continue
+                            else:
+                                response_text = await response.text()
+                                logger.error(
+                                    f"Failed to send to Google Analytics after {MAX_RETRIES} retries: {response.status} - {response_text}"
+                                )
+                                return False
+                        else:
+                            response_text = await response.text()
+                            logger.error(
+                                f"Failed to send to Google Analytics: {response.status} - {response_text}"
+                            )
+                            return False
 
-                    return True
-                elif response.status_code == 429:  # Rate limiting
-                    if attempt < MAX_RETRIES - 1:
-                        # Exponential backoff: 1s, 2s, 4s
-                        backoff = 2**attempt
-                        logger.warning(
-                            f"Rate limited by Google Analytics. Retrying in {backoff}s..."
-                        )
-                        time.sleep(backoff)
-                        continue
-                    else:
-                        logger.error(
-                            f"Failed to send to Google Analytics after {MAX_RETRIES} retries: {response.status_code} - {response.text}"
-                        )
-                        return False
-                else:
-                    logger.error(
-                        f"Failed to send to Google Analytics: {response.status_code} - {response.text}"
-                    )
-                    return False
-
-            except requests.exceptions.Timeout:
+            except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES - 1:
                     logger.warning(
                         f"Timeout connecting to Google Analytics. Retry {attempt+1}/{MAX_RETRIES}"
@@ -302,7 +307,7 @@ def send_to_google_analytics(event_data: Dict[str, Any]) -> bool:
                 else:
                     logger.error("Google Analytics request timed out after all retries")
                     return False
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 logger.error(f"Request error sending to Google Analytics: {str(e)}")
                 return False
 
@@ -349,38 +354,25 @@ if __name__ == "__main__":
         "userId": "test-user-123",
         "eventKey": "purchase_completed",
         "eventName": "Purchase Completed",
-        "attributes": {
-            "device": "mobile",
-            "location": "australia",
-            "browser": "chrome",
-        },
-        "experimentIds": ["exp_1", "exp_2"],
-        "eventTags": {
+        "tags": {
             "revenue": 99.99,
             "items": 3,
-            "category": "travel",
-            "destination": "bali",
+            "category": "electronics",
         },
     }
 
-    # Test both notification types
-    logger.info("Testing decision notification...")
-    decision_result = send_to_google_analytics(decision_notification)
-    logger.info(
-        f"Decision notification test result: {'Success' if decision_result else 'Failed'}"
-    )
+    # Test sending to GA
+    async def test_ga():
+        # Test decision notification
+        result1 = await send_to_google_analytics(decision_notification)
+        logger.info(f"Decision notification result: {result1}")
 
-    logger.info("\nTesting track notification...")
-    track_result = send_to_google_analytics(track_notification)
-    logger.info(
-        f"Track notification test result: {'Success' if track_result else 'Failed'}"
-    )
+        # Test track notification
+        result2 = await send_to_google_analytics(track_notification)
+        logger.info(f"Track notification result: {result2}")
 
-    # Test invalid input
-    logger.info("\nTesting invalid input...")
-    invalid_result = send_to_google_analytics("not a dictionary")
-    logger.info(
-        f"Invalid input test result: {'Success' if not invalid_result else 'Failed'}"
-    )
-
-    logger.info("\nGoogle Analytics integration module test completed")
+    # Run the async test
+    if os.environ.get("GA_MEASUREMENT_ID") and os.environ.get("GA_API_SECRET"):
+        asyncio.run(test_ga())
+    else:
+        logger.warning("Skipping GA test - environment variables not set")
