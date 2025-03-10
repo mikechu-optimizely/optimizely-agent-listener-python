@@ -1,16 +1,20 @@
-# Optimizely Agent Notification Center
+# Optimizely Agent Listener
 
-This solution provides a Python-based notification listener for Optimizely Agent that forwards notifications to Google Analytics and Amplitude.
+This solution provides a Python-based listener for Optimizely Agent that forwards notifications to Google Analytics and Amplitude.
 
 ## Overview
 
 The solution consists of the following components:
 
-1. **`main.py`** - Core notification listener that connects to Optimizely Agent's SSE (Server-Sent Events) endpoint and processes notifications.
-2. **`google_analytics.py`** - Module for sending metrics to Google Analytics.
-3. **`amplitude.py`** - Module for sending metrics to Amplitude.
-4. **`Dockerfile`** - Container definition for running the notification center in a Kubernetes pod.
-5. **`requirements.txt`** - Python dependencies required by the solution.
+1. **`main.py`** - Core application that connects to Optimizely Agent's SSE (Server-Sent Events) endpoint and processes notifications.
+2. **`notification_listener.py`** - Module for listening to Optimizely Agent notification stream.
+3. **`notification_processor.py`** - Module for processing notifications and routing them to analytics platforms.
+4. **`event_buffer.py`** - Module for buffering events to handle high volumes and retries.
+5. **`google_analytics.py`** - Module for sending metrics to Google Analytics.
+6. **`amplitude.py`** - Module for sending metrics to Amplitude.
+7. **`logger_config.py`** - Module for configuring logging.
+8. **`Dockerfile`** - Container definition for running the listener in a Kubernetes pod.
+9. **`requirements.txt`** - Python dependencies required by the solution.
 
 ## Configuration
 
@@ -39,7 +43,7 @@ The application is configured using environment variables:
 
 ## Running Optimizely Agent Locally for Development & Testing
 
-Before running the notification listener, you need to have an instance of Optimizely Agent running. The easiest way to do this is using Docker:
+Before running the listener, you need to have an instance of Optimizely Agent running. The easiest way to do this is using Docker:
 
 ```bash
 docker run -d -p 8080:8080 -p 8085:8085 -p 8088:8088 -e OPTIMIZELY_LOG_PRETTY=true -e OPTIMIZELY_SERVER_HOST=0.0.0.0 -e OPTIMIZELY_SERVER_ALLOWEDHOSTS=localhost,127.0.0.1 -e OPTIMIZELY_API_ENABLENOTIFICATIONS=1 --rm optimizely/agent
@@ -49,7 +53,7 @@ This command:
 - Runs the Optimizely Agent container in detached mode
 - Maps the necessary ports (8080, 8085, 8088) to your local machine
 - Configures the agent to accept requests from localhost
-- Enables the notification stream (required for the notification listener)
+- Enables the notification stream (required for the listener)
 - Automatically removes the container when it stops
 - Remove the `-d` flag to run the container in the foreground (for debugging)
 
@@ -61,7 +65,7 @@ curl -X GET "http://localhost:8080/v1/config" -H "X-Optimizely-SDK-Key: YOUR_SDK
 
 ## Running Locally (Outside Container)
 
-For local development, you can run the notification center directly on your machine using a virtual environment:
+For local development, you can run the listener directly on your machine using a virtual environment:
 
 1. Create a virtual environment:
 
@@ -101,7 +105,7 @@ cp .env.sample .env
 
 5. Edit the `.env` file with your actual configuration values.
 
-6. Run the notification center:
+6. Run the listener:
 
 ```bash
 python main.py
@@ -114,29 +118,29 @@ The script will automatically load environment variables from the `.env` file if
 Build the container:
 
 ```bash
-docker build -t optimizely-notification-center .
+docker build -t optimizely-agent-listener .
 ```
 
 Run the container with proper environment variables:
 
 ```bash
 docker run -d \
-  --name notification-center \
+  --name optimizely-agent-listener \
   -e OPTIMIZELY_SDK_KEY=<your-sdk-key> \
   -e OPTIMIZELY_AGENT_BASE_URL=http://optimizely-agent:8080 \
   -e GA_MEASUREMENT_ID=<your-ga-id> \
   -e GA_API_SECRET=<your-ga-secret> \
   -e AMPLITUDE_API_KEY=<your-amplitude-key> \
-  optimizely-notification-center
+  optimizely-agent-listener
 ```
 
 ## Kubernetes Integration
 
-The notification center is designed to run as a third container in the same pod as the PHP website and Optimizely Agent. Here's an example snippet to add to your existing Kubernetes pod configuration:
+The listener is designed to run as a third container in the same pod as the application and Optimizely Agent. Here's an example snippet to add to your existing Kubernetes pod configuration:
 
 ```yaml
-- name: notification-center
-  image: optimizely-notification-center:latest
+- name: optimizely-agent-listener
+  image: optimizely-agent-listener:latest
   env:
     - name: OPTIMIZELY_SDK_KEY
       valueFrom:
@@ -164,8 +168,8 @@ The notification center is designed to run as a third container in the same pod 
 
 ## Data Flow
 
-1. The PHP website sends requests to the Optimizely Agent for decisions and to track events.
-2. The notification center listens to the Agent's SSE endpoint to receive notifications.
+1. An example PHP website sends requests to the Optimizely Agent for decisions and to track events.
+2. The listener connects to the Agent's SSE endpoint to receive notifications.
 3. When a notification is received, it is processed and forwarded to:
    - Google Analytics using the Measurement Protocol
    - Amplitude using their HTTP API
@@ -178,14 +182,16 @@ The notification center is designed to run as a third container in the same pod 
 
 ## Error Handling
 
-The notification center includes robust error handling with:
+The listener includes robust error handling with:
 - Automatic reconnection if the SSE connection is lost
 - Detailed logging for troubleshooting
 - Graceful handling of configuration errors
 
 ## Dependencies
 
-- `sseclient-py`: For SSE connection
+- `aiohttp`: For asynchronous HTTP requests
+- `aiohttp-sse-client`: For asynchronous SSE client
+- `python-dotenv`: For loading environment variables from .env file
 - `requests`: For HTTP requests to analytics platforms
 - `urllib3`: For HTTP utilities
 
