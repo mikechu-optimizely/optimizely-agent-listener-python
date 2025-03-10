@@ -1,0 +1,26 @@
+services:
+  optimizely-agent-listener:
+    image: optimizely-agent-listener:latest
+    container_name: optimizely-agent-listener
+    restart: unless-stopped
+    environment:
+      # Optimizely Configuration
+      - OPTIMIZELY_SDK_KEY=${OPTIMIZELY_SDK_KEY}
+      - OPTIMIZELY_AGENT_BASE_URL=${OPTIMIZELY_AGENT_BASE_URL:-http://optimizely-agent:8080}
+      - NOTIFICATION_FILTER=${NOTIFICATION_FILTER:-decision,track}
+      
+      # Google Analytics Configuration
+      - GA_MEASUREMENT_ID=${GA_MEASUREMENT_ID}
+      - GA_API_SECRET=${GA_API_SECRET}
+      - GA_ENDPOINT_URL=${GA_ENDPOINT_URL:-https://www.google-analytics.com/mp/collect}
+      
+      # Amplitude Configuration
+      - AMPLITUDE_API_KEY=${AMPLITUDE_API_KEY}
+      - AMPLITUDE_TRACKING_URL=${AMPLITUDE_TRACKING_URL:-https://api2.amplitude.com/2/httpapi}
+    networks:
+      - optimizely-network
+
+networks:
+  optimizely-network:
+    name: optimizely-network
+    external: true
