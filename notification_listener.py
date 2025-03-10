@@ -100,6 +100,7 @@ class NotificationListener:
         
         if self.session:
             await self.session.close()
+            await asyncio.sleep(0.1)  # wait for the session to close
             self.session = None
         
         logger.info("Notification listener stopped")

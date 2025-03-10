@@ -135,11 +135,11 @@ class NotificationProcessor:
             ga_measurement_id = os.getenv("GA_MEASUREMENT_ID")
             ga_api_secret = os.getenv("GA_API_SECRET")
             
-            if not ga_measurement_id or ga_measurement_id == "YOUR_GA_MEASUREMENT_ID":
+            if not ga_measurement_id or ga_measurement_id == "your_ga_measurement_id":
                 warnings.append("Google Analytics tracking disabled - GA_MEASUREMENT_ID not set or contains placeholder value")
                 self.ga_enabled = False
             
-            if not ga_api_secret or ga_api_secret == "YOUR_GA_API_SECRET":
+            if not ga_api_secret or ga_api_secret == "your_ga_api_secret":
                 warnings.append("Google Analytics tracking disabled - GA_API_SECRET not set or contains placeholder value")
                 self.ga_enabled = False
         
@@ -148,7 +148,7 @@ class NotificationProcessor:
             import os
             amplitude_api_key = os.getenv("AMPLITUDE_API_KEY")
             
-            if not amplitude_api_key or amplitude_api_key == "YOUR_AMPLITUDE_API_KEY":
+            if not amplitude_api_key or amplitude_api_key == "your_amplitude_api_key":
                 warnings.append("Amplitude tracking disabled - AMPLITUDE_API_KEY not set or contains placeholder value")
                 self.amplitude_enabled = False
         

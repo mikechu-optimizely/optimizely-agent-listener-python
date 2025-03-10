@@ -90,27 +90,43 @@ async def shutdown(signal=None):
     global running
     
     if signal:
-        logger.info(f"Received exit signal {signal.name}...")
+        signal_name = signal_number_to_name(signal)
+        logger.info(f"Received exit signal {signal_name}...")
     
     logger.info("Shutting down...")
     
     # Stop the notification listener
     logger.info("Stopping notification listener...")
-    await listener.stop()
+    if 'listener' in globals():
+        await listener.stop()
     
     # Stop the event buffer
     logger.info("Stopping event buffer...")
-    buffer.stop()
+    if 'buffer' in globals():
+        buffer.stop()
     
     # Set the running flag to False
     running = False
 
+def signal_number_to_name(sig_num):
+    """Convert a signal number to its name."""
+    for name, value in vars(signal).items():
+        if name.startswith('SIG') and not name.startswith('SIG_') and value == sig_num:
+            return name
+    return str(sig_num)  # Fallback to string representation of the number
+
 def signal_handler():
     """Register signal handlers for graceful shutdown."""
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        asyncio.get_event_loop().add_signal_handler(
-            sig, lambda s=sig: asyncio.create_task(shutdown(s))
-        )
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            asyncio.get_event_loop().add_signal_handler(
+                sig, lambda s=sig: asyncio.create_task(shutdown(s))
+            )
+    except NotImplementedError:
+        # Windows doesn't support add_signal_handler with ProactorEventLoop
+        logger.info("Using signal.signal() for Windows compatibility")
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, lambda s, _: asyncio.create_task(shutdown(s)))
 
 async def main():
     """
@@ -144,29 +160,37 @@ async def main():
     buffer.register_processor(process_buffered_event)
     
     # Start the event buffer processor
-    asyncio.create_task(buffer.process_events())
+    buffer_task = asyncio.create_task(buffer.process_events())
     
-    # Create the notification listener
-    listener = NotificationListener(
-        sdk_key=OPTIMIZELY_SDK_KEY,
-        agent_url=AGENT_NOTIFICATIONS_ENDPOINT,
-        event_callback=handle_event
-    )
-    
-    # Start the notification listener
-    await listener.start()
-    
-    # Register signal handlers for graceful shutdown
-    signal_handler()
-    
-    # Main loop - keep the application running until shutdown is requested
-    while running:
-        await asyncio.sleep(1)
+    try:
+        # Create the notification listener
+        listener = NotificationListener(
+            sdk_key=OPTIMIZELY_SDK_KEY,
+            agent_base_url=OPTIMIZELY_AGENT_BASE_URL,
+            event_callback=handle_event
+        )
         
-        # Log buffer stats periodically
-        if running and time.time() % 60 < 1:  # Approximately once per minute
-            stats = buffer.get_stats()
-            logger.info(f"Buffer stats: {stats}")
+        # Start the notification listener
+        await listener.start()
+        
+        # Register signal handlers for graceful shutdown
+        signal_handler()
+        
+        # Main loop - keep the application running until shutdown is requested
+        while running:
+            await asyncio.sleep(1)
+            
+            # Log buffer stats periodically
+            if running and time.time() % 60 < 1:  # Approximately once per minute
+                stats = buffer.get_stats()
+                logger.info(f"Buffer stats: {stats}")
+    except Exception as e:
+        logger.error(f"Error in main loop: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        # Ensure proper cleanup
+        await shutdown()
     
     logger.info("Application shutdown complete")
 
