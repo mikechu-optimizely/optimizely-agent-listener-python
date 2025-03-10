@@ -28,7 +28,7 @@ class NotificationListener:
     def __init__(
         self, 
         sdk_key: str, 
-        agent_url: str, 
+        agent_base_url: str, 
         filter_type: Optional[str] = None,
         max_retries: int = 10,
         heartbeat_interval: float = 2.0,
@@ -39,14 +39,14 @@ class NotificationListener:
         
         Args:
             sdk_key: The Optimizely SDK key
-            agent_url: The full URL to the Optimizely Agent notification endpoint
+            agent_base_url: The base URL of the Optimizely Agent (e.g., http://localhost:8080)
             filter_type: Optional filter for notification types (e.g., 'decision')
             max_retries: Maximum number of connection retry attempts
             heartbeat_interval: Interval (in seconds) to check for heartbeats
             event_callback: Async callback function to process events
         """
         self.sdk_key = sdk_key
-        self.agent_url = agent_url
+        self.agent_base_url = agent_base_url
         self.filter_type = filter_type
         self.max_retries = max_retries
         self.heartbeat_interval = heartbeat_interval
@@ -56,9 +56,9 @@ class NotificationListener:
         self.task = None
         
         # Construct the notification URL with filter if provided
-        self.notification_url = agent_url
+        self.notification_url = f"{agent_base_url}/v1/notifications/event-stream"
         if filter_type:
-            self.notification_url = f"{agent_url}?filter={filter_type}"
+            self.notification_url = f"{self.notification_url}?filter={filter_type}"
             logger.info(f"Notification filter: {filter_type}")
         else:
             logger.info("No notification filter set - listening for all notification types")
@@ -200,9 +200,7 @@ class NotificationListener:
                             logger.warning(f"No activity for {self.heartbeat_interval} seconds, checking connection...")
                             # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
                             try:
-                                # Extract base URL for health check
-                                base_url = self.agent_url.split('/v1/')[0]
-                                health_url = f"{base_url}/health"
+                                health_url = f"{self.agent_base_url}/health"
                                 logger.info(f"Sending ping to health endpoint: {health_url}")
                                 
                                 # Use the session to make the request
@@ -233,8 +231,7 @@ class NotificationListener:
                 # Check if the agent is still running before retrying
                 try:
                     # Extract base URL for health check
-                    base_url = self.agent_url.split('/v1/')[0]
-                    health_url = f"{base_url}/health"
+                    health_url = f"{self.agent_base_url}/health"
                     logger.info(f"Checking if Optimizely Agent is still running: {health_url}")
                     
                     # Use the session to make the request

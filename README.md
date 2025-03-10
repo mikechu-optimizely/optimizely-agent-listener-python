@@ -22,7 +22,7 @@ The application is configured using environment variables:
 
 ### Optional Environment Variables
 
-- `OPTIMIZELY_AGENT_URL` - URL of the Optimizely Agent (default: `http://localhost:8080`)
+- `OPTIMIZELY_AGENT_BASE_URL` - Base URL of the Optimizely Agent (default: `http://localhost:8080`)
 - `NOTIFICATION_FILTER` - Filter for specific notification types (e.g., `decision`)
 
 ### Google Analytics Configuration
@@ -123,7 +123,7 @@ Run the container with proper environment variables:
 docker run -d \
   --name notification-center \
   -e OPTIMIZELY_SDK_KEY=<your-sdk-key> \
-  -e OPTIMIZELY_AGENT_URL=http://optimizely-agent:8080 \
+  -e OPTIMIZELY_AGENT_BASE_URL=http://optimizely-agent:8080 \
   -e GA_MEASUREMENT_ID=<your-ga-id> \
   -e GA_API_SECRET=<your-ga-secret> \
   -e AMPLITUDE_API_KEY=<your-amplitude-key> \
@@ -143,7 +143,7 @@ The notification center is designed to run as a third container in the same pod 
         secretKeyRef:
           name: optimizely-secrets
           key: sdk-key
-    - name: OPTIMIZELY_AGENT_URL
+    - name: OPTIMIZELY_AGENT_BASE_URL
       value: "http://localhost:8080"  # Since running in same pod
     - name: GA_MEASUREMENT_ID
       valueFrom:

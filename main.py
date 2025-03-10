@@ -33,8 +33,8 @@ if env_path.exists():
 
 # Get configuration from environment variables
 OPTIMIZELY_SDK_KEY = os.getenv("OPTIMIZELY_SDK_KEY")
-OPTIMIZELY_AGENT_URL = os.getenv("OPTIMIZELY_AGENT_URL", "http://localhost:8080")
-AGENT_NOTIFICATIONS_ENDPOINT = f"{OPTIMIZELY_AGENT_URL}/v1/notifications/event-stream"
+OPTIMIZELY_AGENT_BASE_URL = os.getenv("OPTIMIZELY_AGENT_BASE_URL", "http://localhost:8080")
+AGENT_NOTIFICATIONS_ENDPOINT = f"{OPTIMIZELY_AGENT_BASE_URL}/v1/notifications/event-stream"
 
 # Global flag to control the main loop
 running = True
@@ -132,7 +132,7 @@ async def main():
         logger.warning(warning)
     
     # Test the connection to the Optimizely Agent
-    connection_ok = await test_agent_connection(OPTIMIZELY_SDK_KEY, OPTIMIZELY_AGENT_URL)
+    connection_ok = await test_agent_connection(OPTIMIZELY_SDK_KEY, OPTIMIZELY_AGENT_BASE_URL)
     if not connection_ok:
         logger.error("Failed to connect to Optimizely Agent. Exiting.")
         return
