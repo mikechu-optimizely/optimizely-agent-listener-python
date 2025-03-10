@@ -21,9 +21,29 @@ import requests
 import aiohttp
 from aiohttp_sse_client import client as sse_client
 
-# Set up logging first, so we can log any issues with environment loading
+# Custom log formatter with emojis
+class EmojiLogFormatter(logging.Formatter):
+    """Custom log formatter that uses emojis for log levels."""
+    
+    FORMATS = {
+        logging.DEBUG: "🔍 %(message)s",
+        logging.INFO: "💬 %(message)s",
+        logging.WARNING: "⚠️ %(message)s",
+        logging.ERROR: "❌ %(message)s",
+        logging.CRITICAL: "🔥 %(message)s"
+    }
+    
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+# Set up logging with emoji formatter
+handler = logging.StreamHandler()
+handler.setFormatter(EmojiLogFormatter())
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG,
+    handlers=[handler]
 )
 logger = logging.getLogger(__name__)
 

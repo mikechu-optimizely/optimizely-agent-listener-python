@@ -13,7 +13,6 @@ import time
 from typing import Dict, Any
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
