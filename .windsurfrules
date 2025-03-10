@@ -1,0 +1,10 @@
+- Cascade should not explain what it will do or summarize what it did unless asked by the user.
+- Always produce clear, concise code, striving for simplicity.
+- Produce secure code by sanitize inputs, validate outputs, handle errors, etc.
+- Avoid internal comments instead use descriptive names for variables, functions, classes, etc.
+- Add and correct jsdoc, docstrings, etc. 
+- Avoide code duplication.
+- Produce performant code.
+- Use internal libraries then external libraries instead of writing your own code.
+- Use async/await instead of callbacks or synchronous code unless explicitly requested by the user.
+- Use type hints for function parameters and return values.
