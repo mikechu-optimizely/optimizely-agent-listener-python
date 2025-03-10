@@ -9,11 +9,9 @@ forwards them to analytics platforms.
 import os
 import asyncio
 import json
-import logging
 import time
 import signal
 from pathlib import Path
-import aiohttp
 from dotenv import load_dotenv
 
 # Import our modules
@@ -75,6 +73,7 @@ async def process_buffered_event(event_data):
     try:
         # Use the notification processor to process the event
         success, _ = await processor.process_notification(type('Event', (), {'data': json.dumps(event_data)}))
+        logger.debug(f"Processed buffered event: {event_data}")
         return success
     except Exception as e:
         logger.error(f"Error processing buffered event: {str(e)}")

@@ -6,7 +6,6 @@ This module provides a buffer/queue system for event processing with retry capab
 """
 
 import asyncio
-import json
 import logging
 import time
 from typing import Dict, Any, List, Callable, Awaitable
