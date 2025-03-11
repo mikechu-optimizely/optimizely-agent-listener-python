@@ -39,7 +39,7 @@ class NotificationProcessor:
             event: The event object from the SSE client
             
         Returns:
-            A tuple of (success, event_data)
+            Boolean indicating success
         """
         try:
             # Parse the event data
@@ -111,14 +111,14 @@ class NotificationProcessor:
             if total_platforms == 0:
                 logger.info("Event received but no analytics services are configured for forwarding")
             
-            return True, event_data
+            return success_count > 0 or total_platforms == 0
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse notification data: {str(e)}")
-            return False, None
+            return False
         except Exception as e:
             logger.error(f"Error processing notification: {str(e)}")
-            return False, None
+            return False
     
     def check_analytics_config(self) -> List[str]:
         """

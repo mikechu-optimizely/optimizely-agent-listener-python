@@ -73,7 +73,7 @@ async def process_buffered_event(event_data):
     """
     try:
         # Use the notification processor to process the event
-        success, _ = await processor.process_notification(type('Event', (), {'data': json.dumps(event_data)}))
+        success = await processor.process_notification(type('Event', (), {'data': json.dumps(event_data)}))
         logger.debug(f"Processed buffered event: {event_data}")
         return success
     except Exception as e:
