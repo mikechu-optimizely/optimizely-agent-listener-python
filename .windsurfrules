@@ -1,0 +1,41 @@
+# Coding Guidelines
+
+## User / Developer Chat Interactions
+- Never output preambles or summaries of changes
+
+## Coding Standards
+- Use snake_case for variable names
+- Class, function and variable names should be descriptive and meaningful
+- Avoid adding internal comments
+- Add and update python docstrings
+- When asked to create commit messages, use conventional commit format with a bulleted list of changes as the description.
+- Always ask for or run the following Git command to get the changes for an accurate commit message & description: `git --no-pager diff --staged`
+
+## Error Handling
+- Implement retry mechanisms with exponential backoff for failed requests to Google and Amplitude
+- Handle SSE connection errors and reconnect to Optimizely Agent as needed
+- Log errors with relevant context for debugging and analytics
+
+## Performance Optimization
+- Utilize asynchronous programming to handle high volumes of SSE events and analytics requests
+- Implement caching mechanisms to reduce database load and improve response times
+- Use profiling and monitoring tools to identify bottlenecks and optimize performance
+
+## Security
+- Validate and sanitize incoming SSE event data to prevent security vulnerabilities
+- Implement authentication and authorization mechanisms for Google and Amplitude APIs
+- Watch for the User to accidentally expose sensitive data in code and notify about it in the Cascade chat using emojis for attention
+- Limit communication between containers to the necessary minimum
+
+## Scalability
+- Design the app as a side car container to Optimizely agent 
+- Consider that the pod will scale horizontally to handle increased traffic and event volumes
+- Implement queueing mechanisms to handle event bursts and prevent data loss
+
+## Monitoring and Logging
+- Implement logging mechanisms to track errors, warnings, and information events to standard output
+- Use logging and monitoring data to inform optimization and debugging efforts
+
+## Testing
+- Write comprehensive unit tests and integration tests to ensure app functionality
+- Use testing data to inform optimization and debugging efforts
