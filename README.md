@@ -15,6 +15,7 @@ The solution consists of the following components:
 7. **`logger_config.py`** - Module for configuring logging.
 8. **`Dockerfile`** - Container definition for running the listener in a Kubernetes pod.
 9. **`requirements.txt`** - Python dependencies required by the solution.
+10. **`decide_testing.py`** - Utility script for simulating production traffic patterns to test the listener.
 
 ## Configuration
 
@@ -113,6 +114,20 @@ python main.py
 
 The script will automatically load environment variables from the `.env` file if it exists.
 
+## Testing the Listener
+
+You can test the listener by sending requests to the Optimizely Agent's decide endpoint. The included `decide_testing.py` script simulates production traffic patterns:
+
+```bash
+# Set your SDK key in the environment
+export OPTIMIZELY_SDK_KEY=your_sdk_key
+
+# Run the testing script
+python decide_testing.py
+```
+
+This will send requests with varying user IDs (400-500 by default) at random intervals to simulate real-world traffic patterns.
+
 ## Running in Docker
 
 Build the container:
@@ -184,6 +199,8 @@ The listener is designed to run as a third container in the same pod as the appl
 
 The listener includes robust error handling with:
 - Automatic reconnection if the SSE connection is lost
+- Exponential backoff for retry attempts
+- Event buffering to handle temporary failures
 - Detailed logging for troubleshooting
 - Graceful handling of configuration errors
 
