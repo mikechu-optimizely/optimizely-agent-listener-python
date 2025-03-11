@@ -21,3 +21,12 @@ ENV/
 
 # Ignore any logs
 *.log
+
+# Ignore Docker files
+Dockerfile
+docker-compose.yml
+docker-compose.yaml
+
+# Ignore test files
+test*
+decide_testing.py
