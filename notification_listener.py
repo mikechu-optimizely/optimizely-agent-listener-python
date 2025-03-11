@@ -12,7 +12,7 @@ import logging
 import time
 from typing import Dict, Any, Optional, Callable, Awaitable
 import aiohttp
-from aiohttp_sse_client import client as sse_client
+from aiosseclient import aiosseclient
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -130,90 +130,84 @@ class NotificationListener:
             try:
                 logger.info(f"Sending request with headers: {headers}")
                 
-                # Connect to the SSE endpoint using aiohttp-sse-client
-                async with sse_client.EventSource(
-                    self.notification_url, 
-                    headers=headers, 
-                    session=self.session, 
-                    timeout=60
-                ) as event_source:
+                # Connect to the SSE endpoint using aiosseclient
+                last_activity_time = time.time()
+                
+                async for event in aiosseclient(
+                    self.notification_url,
+                    headers=headers,
+                    session=self.session
+                ):
                     # Reset retry counter after successful connection
                     retry_count = 0
-                    logger.info("Successfully connected to Optimizely Agent")
-                    logger.info("Waiting for events...")
                     
-                    # Setup heartbeat detection
+                    # Update last activity time
                     last_activity_time = time.time()
                     
-                    # Process events as they arrive
-                    async for event in event_source:
-                        # Update last activity time
-                        last_activity_time = time.time()
-                        
-                        if event.data:
-                            # Extract user ID for logging
-                            user_id = "unknown"
-                            try:
-                                event_data = json.loads(event.data)
-                                if "UserContext" in event_data and "ID" in event_data["UserContext"]:
-                                    user_id = event_data["UserContext"]["ID"]
-                                elif "userId" in event_data:
-                                    user_id = event_data["userId"]
-                                
-                                # Extract notification type
-                                notification_type = "unknown"
-                                if "Type" in event_data:
-                                    notification_type = event_data["Type"]
-                                elif "type" in event_data:
-                                    notification_type = event_data["type"]
-                                
-                                # Log a more detailed summary of the event
-                                logger.debug(f"Received {notification_type} event for user {user_id}: {event.data[:100]}...")
-                                
-                                # For flag decisions, extract and log the flag key and variation
-                                if notification_type == "flag" and "DecisionInfo" in event_data:
-                                    decision_info = event_data["DecisionInfo"]
-                                    flag_key = decision_info.get("flagKey", "unknown")
-                                    variation_key = decision_info.get("variationKey", "unknown")
-                                    logger.debug(f"Flag decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
-                            except json.JSONDecodeError:
-                                logger.error(f"Failed to parse event data as JSON: {event.data[:100]}...")
-                            except Exception as e:
-                                logger.error(f"Error extracting event details: {str(e)}")
+                    if event.data:
+                        # Extract user ID for logging
+                        user_id = "unknown"
+                        try:
+                            event_data = json.loads(event.data)
+                            if "UserContext" in event_data and "ID" in event_data["UserContext"]:
+                                user_id = event_data["UserContext"]["ID"]
+                            elif "userId" in event_data:
+                                user_id = event_data["userId"]
                             
-                            try:
-                                # Check if this is a decide API event
-                                if "decide" in event.data.lower() or "variationKey" in event.data:
-                                    logger.info(f"Detected a decide API event for user: {user_id}")
-                                
-                                # Process the event with the callback if provided
-                                if self.event_callback:
-                                    await self.event_callback(event)
-                            except Exception as e:
-                                logger.error(f"Error processing notification: {str(e)}")
-                        else:
-                            # Empty data might be a heartbeat or keep-alive
-                            logger.debug("Received event with empty data (possible heartbeat)")
+                            # Extract notification type
+                            notification_type = "unknown"
+                            if "Type" in event_data:
+                                notification_type = event_data["Type"]
+                            elif "type" in event_data:
+                                notification_type = event_data["type"]
+                            
+                            # Log a more detailed summary of the event
+                            logger.debug(f"Received {notification_type} event for user {user_id}: {event.data[:100]}...")
+                            
+                            # For flag decisions, extract and log the flag key and variation
+                            if notification_type == "flag" and "DecisionInfo" in event_data:
+                                decision_info = event_data["DecisionInfo"]
+                                flag_key = decision_info.get("flagKey", "unknown")
+                                variation_key = decision_info.get("variationKey", "unknown")
+                                logger.debug(f"Flag decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse event data as JSON: {event.data[:100]}...")
+                        except Exception as e:
+                            logger.error(f"Error extracting event details: {str(e)}")
                         
-                        # Check for heartbeat timeout
-                        current_time = time.time()
-                        if current_time - last_activity_time > self.heartbeat_interval:
-                            logger.warning(f"No activity for {self.heartbeat_interval} seconds, checking connection...")
-                            # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
-                            try:
-                                health_url = f"{self.agent_base_url}/health"
-                                logger.info(f"Sending ping to health endpoint: {health_url}")
-                                
-                                # Use the session to make the request
-                                async with self.session.get(health_url, timeout=5) as response:
-                                    logger.info(f"Health ping response: {response.status}")
-                                
-                                # Reset last activity time
-                                last_activity_time = time.time()
-                            except Exception as ping_error:
-                                logger.error(f"Error sending health ping: {str(ping_error)}")
-                                # Force a reconnection
-                                raise Exception("Connection inactive, forcing reconnection")
+                        try:
+                            # Check if this is a decide API event
+                            if "decide" in event.data.lower() or "variationKey" in event.data:
+                                logger.info(f"Detected a decide API event for user: {user_id}")
+                            
+                            # Process the event with the callback if provided
+                            if self.event_callback:
+                                await self.event_callback(event)
+                        except Exception as e:
+                            logger.error(f"Error processing notification: {str(e)}")
+                    else:
+                        # Empty data might be a heartbeat or keep-alive
+                        logger.debug("Received event with empty data (possible heartbeat)")
+                    
+                    # Check for heartbeat timeout
+                    current_time = time.time()
+                    if current_time - last_activity_time > self.heartbeat_interval:
+                        logger.warning(f"No activity for {self.heartbeat_interval} seconds, checking connection...")
+                        # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
+                        try:
+                            health_url = f"{self.agent_base_url}/health"
+                            logger.info(f"Sending ping to health endpoint: {health_url}")
+                            
+                            # Use the session to make the request
+                            async with self.session.get(health_url, timeout=5) as response:
+                                logger.info(f"Health ping response: {response.status}")
+                            
+                            # Reset last activity time
+                            last_activity_time = time.time()
+                        except Exception as ping_error:
+                            logger.error(f"Error sending health ping: {str(ping_error)}")
+                            # Force a reconnection
+                            raise Exception("Connection inactive, forcing reconnection")
             
             except asyncio.CancelledError:
                 logger.info("Async task was cancelled. Shutting down...")

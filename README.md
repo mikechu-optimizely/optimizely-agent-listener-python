@@ -190,7 +190,7 @@ The listener includes robust error handling with:
 ## Dependencies
 
 - `aiohttp`: For asynchronous HTTP requests
-- `aiohttp-sse-client`: For asynchronous SSE client
+- `aiosseclient`: For asynchronous SSE client
 - `python-dotenv`: For loading environment variables from .env file
 - `requests`: For HTTP requests to analytics platforms
 - `urllib3`: For HTTP utilities
