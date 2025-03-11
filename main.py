@@ -9,6 +9,7 @@ forwards them to analytics platforms.
 import os
 import asyncio
 import json
+import logging
 import time
 import signal
 from pathlib import Path
