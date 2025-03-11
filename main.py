@@ -21,7 +21,7 @@ from notification_listener import NotificationListener, test_agent_connection
 from notification_processor import NotificationProcessor
 
 # Set up logging
-logger = setup_logging()
+logger = setup_logging(logging.INFO)
 
 # Load environment variables
 env_path = Path('.') / '.env'

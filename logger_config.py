@@ -23,7 +23,7 @@ class EmojiLogFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
-def setup_logging(level=logging.DEBUG):
+def setup_logging(level=logging.INFO):
     """
     Set up logging with emoji formatter.
     

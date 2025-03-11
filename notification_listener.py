@@ -59,9 +59,9 @@ class NotificationListener:
         self.notification_url = f"{agent_base_url}/v1/notifications/event-stream"
         if filter_type:
             self.notification_url = f"{self.notification_url}?filter={filter_type}"
-            logger.info(f"Notification filter: {filter_type}")
+            logger.debug(f"Notification filter: {filter_type}")
         else:
-            logger.info("No notification filter set - listening for all notification types")
+            logger.debug("No notification filter set - listening for all notification types")
     
     async def start(self):
         """
@@ -128,15 +128,14 @@ class NotificationListener:
         
         while self.running and retry_count < self.max_retries:
             try:
-                logger.info(f"Sending request with headers: {headers}")
+                logger.debug(f"Sending request with headers: {headers}")
                 
                 # Connect to the SSE endpoint using aiosseclient
                 last_activity_time = time.time()
                 
                 async for event in aiosseclient(
                     self.notification_url,
-                    headers=headers,
-                    session=self.session
+                    headers=headers
                 ):
                     # Reset retry counter after successful connection
                     retry_count = 0
@@ -178,7 +177,7 @@ class NotificationListener:
                         try:
                             # Check if this is a decide API event
                             if "decide" in event.data.lower() or "variationKey" in event.data:
-                                logger.info(f"Detected a decide API event for user: {user_id}")
+                                logger.debug(f"Detected a decide API event for user: {user_id}")
                             
                             # Process the event with the callback if provided
                             if self.event_callback:
@@ -196,11 +195,11 @@ class NotificationListener:
                         # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
                         try:
                             health_url = f"{self.agent_base_url}/health"
-                            logger.info(f"Sending ping to health endpoint: {health_url}")
+                            logger.debug(f"Sending ping to health endpoint: {health_url}")
                             
                             # Use the session to make the request
                             async with self.session.get(health_url, timeout=5) as response:
-                                logger.info(f"Health ping response: {response.status}")
+                                logger.debug(f"Health ping response: {response.status}")
                             
                             # Reset last activity time
                             last_activity_time = time.time()
@@ -227,11 +226,11 @@ class NotificationListener:
                 try:
                     # Extract base URL for health check
                     health_url = f"{self.agent_base_url}/health"
-                    logger.info(f"Checking if Optimizely Agent is still running: {health_url}")
+                    logger.debug(f"Checking if Optimizely Agent is still running: {health_url}")
                     
                     # Use the session to make the request
                     async with self.session.get(health_url, timeout=5) as response:
-                        logger.info(f"Agent health check response: {response.status}")
+                        logger.debug(f"Agent health check response: {response.status}")
                         if response.status == 200:
                             logger.info("Optimizely Agent is still running. Will reconnect.")
                         else:
