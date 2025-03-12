@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Import our modules
 from logger_config import setup_logging
 from event_buffer import EventBuffer
-from notification_listener import NotificationListener, test_agent_connection
+from notification_listener import NotificationListener, test_agent_connection, NotificationType, determine_notification_type
 from notification_processor import NotificationProcessor
 
 # Set up logging with default level
@@ -82,6 +82,10 @@ async def process_buffered_event(event_data):
         True if processing was successful, False otherwise
     """
     try:
+        # Determine notification type if not already set
+        if "notification_type" not in event_data:
+            event_data["notification_type"] = determine_notification_type(event_data)
+            
         # Use the notification processor to process the event
         success = await processor.process_notification(type('Event', (), {'data': json.dumps(event_data)}))
         logger.debug(f"Processed buffered event: {event_data}")

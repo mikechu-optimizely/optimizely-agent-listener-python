@@ -46,7 +46,7 @@ class EventBuffer:
         self.failed_events = []
         self.processors = []
         
-    def add_event(self, event_data: Dict[str, Any]) -> bool:
+    async def add_event(self, event_data: Dict[str, Any]) -> bool:
         """
         Add an event to the buffer.
         
@@ -68,16 +68,6 @@ class EventBuffer:
             
             # Add to the queue
             self.queue.append(buffer_item)
-            
-            # Log the buffered event
-            event_type = event_data.get("Type", event_data.get("type", "unknown"))
-            user_id = "unknown"
-            if "UserContext" in event_data and "ID" in event_data["UserContext"]:
-                user_id = event_data["UserContext"]["ID"]
-            elif "userId" in event_data:
-                user_id = event_data["userId"]
-                
-            logger.debug(f"Buffered {event_type} event for user {user_id}")
             
             return True
         except Exception as e:
@@ -178,14 +168,21 @@ class EventBuffer:
                     )
             else:
                 # Log successful processing
-                event_type = event_data.get("Type", event_data.get("type", "unknown"))
+                # Use notification_type if it's already set, otherwise use our standard determination function
+                if "notification_type" in event_data:
+                    notification_type = event_data["notification_type"]
+                else:
+                    # Import here to avoid circular imports
+                    from notification_listener import determine_notification_type
+                    notification_type = determine_notification_type(event_data)
+                    logger.warning(f"Redetermined notification type: {notification_type}")
                 user_id = "unknown"
                 if "UserContext" in event_data and "ID" in event_data["UserContext"]:
                     user_id = event_data["UserContext"]["ID"]
                 elif "userId" in event_data:
                     user_id = event_data["userId"]
                     
-                logger.debug(f"Successfully processed {event_type} event for user {user_id}")
+                logger.debug(f"Successfully processed {notification_type} event for user {user_id}")
             
             processed_count += 1
     

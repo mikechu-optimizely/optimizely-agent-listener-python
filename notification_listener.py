@@ -10,12 +10,41 @@ import asyncio
 import json
 import logging
 import time
+from enum import Enum, auto
 from typing import Dict, Any, Optional, Callable, Awaitable
 import aiohttp
 from aiosseclient import aiosseclient
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+class NotificationType(str, Enum):
+    """Enum representing the types of notifications from Optimizely Agent."""
+    DECISION = "decision"
+    TRACK = "track"
+    UNKNOWN = "unknown"
+
+
+def determine_notification_type(event_data):
+    """
+    Determine the notification type based on the event data structure.
+    
+    Args:
+        event_data: The parsed event data from the SSE stream
+        
+    Returns:
+        NotificationType: The type of notification
+    """    
+    # Determine type based on payload structure
+    if"ConversionEvent" in event_data:
+        # This is a track event
+        return NotificationType.TRACK
+    elif "DecisionInfo" in event_data:
+        # This is a decision event
+        return NotificationType.DECISION
+    
+    # Default case
+    return NotificationType.UNKNOWN
 
 class NotificationListener:
     """
@@ -105,6 +134,18 @@ class NotificationListener:
         
         logger.info("Notification listener stopped")
     
+    def _determine_notification_type(self, event_data):
+        """
+        Determine the notification type based on the event data structure.
+        
+        Args:
+            event_data: The parsed event data from the SSE stream
+            
+        Returns:
+            NotificationType: The type of notification
+        """
+        return determine_notification_type(event_data)
+    
     async def _listen_loop(self):
         """
         Main loop for listening to notifications.
@@ -153,31 +194,31 @@ class NotificationListener:
                             elif "userId" in event_data:
                                 user_id = event_data["userId"]
                             
-                            # Extract notification type
-                            notification_type = "unknown"
-                            if "Type" in event_data:
-                                notification_type = event_data["Type"]
-                            elif "type" in event_data:
-                                notification_type = event_data["type"]
+                            # Determine the notification type based on the event data
+                            notification_type = self._determine_notification_type(event_data)
+                            
+                            # Add notification_type as a custom attribute to the event_data
+                            event_data["notification_type"] = notification_type
                             
                             # Log a more detailed summary of the event
                             logger.debug(f"Received {notification_type} event for user {user_id}: {event.data[:100]}...")
                             
-                            # For flag decisions, extract and log the flag key and variation
-                            if notification_type == "flag" and "DecisionInfo" in event_data:
+                            # For decision events, extract and log the flag key and variation
+                            if notification_type == NotificationType.DECISION and "DecisionInfo" in event_data:
                                 decision_info = event_data["DecisionInfo"]
                                 flag_key = decision_info.get("flagKey", "unknown")
                                 variation_key = decision_info.get("variationKey", "unknown")
-                                logger.debug(f"Flag decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
+                                logger.debug(f"Decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
                         except json.JSONDecodeError:
                             logger.error(f"Failed to parse event data as JSON: {event.data[:100]}...")
                         except Exception as e:
                             logger.error(f"Error extracting event details: {str(e)}")
                         
                         try:
-                            # Check if this is a decide API event
-                            if "decide" in event.data.lower() or "variationKey" in event.data:
-                                logger.debug(f"Detected a decide API event for user: {user_id}")
+                            # Log additional details based on notification type
+                            if notification_type == NotificationType.TRACK:
+                                event_key = event_data.get("EventKey", "unknown")
+                                logger.debug(f"Track event details - Event: {event_key}, User: {user_id}")
                             
                             # Process the event with the callback if provided
                             if self.event_callback:

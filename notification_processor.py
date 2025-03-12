@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from google_analytics import send_to_google_analytics
 from amplitude import send_to_amplitude
+from notification_listener import NotificationType
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -52,17 +53,12 @@ class NotificationProcessor:
             elif "userId" in event_data:
                 user_id = event_data["userId"]
             
-            # Extract notification type
-            notification_type = "unknown"
-            if "Type" in event_data:
-                notification_type = event_data["Type"]
-            elif "type" in event_data:
-                notification_type = event_data["type"]
-            
+            # Get notification type that was set by the NotificationListener
+            notification_type = event_data.get("notification_type", NotificationType.UNKNOWN)                    
             logger.info(f"Received notification type: {notification_type} for user: {user_id}")
             
             # Process based on notification type
-            if notification_type == "flag" and "DecisionInfo" in event_data:
+            if notification_type == NotificationType.DECISION and "DecisionInfo" in event_data:
                 # This is a feature flag decision
                 decision_info = event_data["DecisionInfo"]
                 flag_key = decision_info.get("flagKey", "unknown")
@@ -104,7 +100,12 @@ class NotificationProcessor:
                 except Exception as e:
                     logger.error(f"Error sending to Amplitude: {str(e)}")
             
-            # Log the processing result
+            # Log the processing result based on notification type
+            if notification_type in (NotificationType.TRACK, NotificationType.DECISION, NotificationType.UNKNOWN):
+                logger.debug(f"Successfully processed {notification_type} event for user {user_id}")
+            else:
+                logger.debug(f"Successfully processed unknown 🤷‍♀️ event for user {user_id}")
+                
             logger.info(f"Notification processed - Success: {success_count}/{total_platforms}")
             
             # If no platforms are configured, log a warning
