@@ -197,7 +197,7 @@ async def main():
             # Log buffer stats periodically
             if running and time.time() % 60 < 1:  # Approximately once per minute
                 stats = buffer.get_stats()
-                logger.info(f"Buffer stats: {stats}")
+                logger.debug(f"Buffer stats: {stats}")
     except Exception as e:
         logger.error(f"Error in main loop: {str(e)}")
         import traceback

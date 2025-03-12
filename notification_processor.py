@@ -106,11 +106,11 @@ class NotificationProcessor:
             else:
                 logger.debug(f"Successfully processed unknown 🤷‍♀️ event for user {user_id}")
                 
-            logger.info(f"Notification processed - Success: {success_count}/{total_platforms}")
+            logger.info(f"Notification processed successfully. Sent to {success_count}/{total_platforms} analytics platforms.")
             
             # If no platforms are configured, log a warning
             if total_platforms == 0:
-                logger.info("Event received but no analytics services are configured for forwarding")
+                logger.warning("Event received but no analytics services are configured for forwarding")
             
             return success_count > 0 or total_platforms == 0
             
