@@ -1,0 +1,49 @@
+# Use this file to send requests to the Optimizely Agent API for testing.
+# 1. Install REST Client for VS Code.
+#    https://marketplace.visualstudio.com/items?itemName=humao.rest-client or
+#    https://open-vsx.org/vscode/item?itemName=humao.rest-client
+# 2. Be sure your `.env` file in the repo root has been configured.
+# 3. Edit the requests below to match your Optimizely experimentation project.
+
+### Decide
+
+POST {{$dotenv OPTIMIZELY_AGENT_BASE_URL}}/v1/decide
+Content-Type: application/json
+X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
+
+{
+    "userId": "167",
+    "userAttributes": {
+        "country": "US"
+    },
+    "keys": [
+        "show_star_rating"
+    ]
+}
+
+### Track
+
+POST {{$dotenv OPTIMIZELY_AGENT_BASE_URL}}/v1/track?eventKey=customer_satisfaction_score
+Content-Type: application/json
+X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
+
+{
+    "userId": "167",
+    "eventTags": {
+        "is_original_click": true
+    }
+}
+
+### Config
+
+GET {{$dotenv OPTIMIZELY_AGENT_BASE_URL}}/v1/config
+Content-Type: application/json
+X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
+
+### Health
+
+GET {{$dotenv OPTIMIZELY_AGENT_BASE_URL}}/v1/health
+Content-Type: application/json
+X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
+
+###

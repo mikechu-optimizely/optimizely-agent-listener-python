@@ -30,3 +30,4 @@ docker-compose.yaml
 # Ignore test files
 test*
 decide_testing.py
+example_agent_requests.http
