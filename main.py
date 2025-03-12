@@ -21,7 +21,7 @@ from event_buffer import EventBuffer
 from notification_listener import NotificationListener, test_agent_connection
 from notification_processor import NotificationProcessor
 
-# Set up logging
+# Set up logging with default level
 logger = setup_logging(logging.INFO)
 
 # Load environment variables
@@ -29,6 +29,13 @@ env_path = Path('.') / '.env'
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
     logger.info("Loaded environment variables from .env file")
+
+# Get log level from environment variable or default to INFO
+log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Update logging level
+logging.getLogger().setLevel(log_level)
 
 # Get configuration from environment variables
 OPTIMIZELY_SDK_KEY = os.getenv("OPTIMIZELY_SDK_KEY")
@@ -48,6 +55,9 @@ async def handle_event(event):
     Args:
         event: The event object from the SSE client
     """
+    # Log the event
+    logger.debug(f"Received event: {event}")
+    
     try:
         # Parse the event data
         event_data = json.loads(event.data)
