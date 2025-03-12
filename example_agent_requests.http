@@ -5,6 +5,8 @@
 # 2. Be sure your `.env` file in the repo root has been configured.
 # 3. Edit the requests below to match your Optimizely experimentation project.
 
+@userId="168"
+
 ### Decide
 
 POST {{$dotenv OPTIMIZELY_AGENT_BASE_URL}}/v1/decide
@@ -12,7 +14,7 @@ Content-Type: application/json
 X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
 
 {
-    "userId": "167",
+    "userId": {{userId}},
     "userAttributes": {
         "country": "US"
     },
@@ -28,7 +30,7 @@ Content-Type: application/json
 X-Optimizely-SDK-Key: {{$dotenv OPTIMIZELY_SDK_KEY}}
 
 {
-    "userId": "167",
+    "userId": {{userId}},
     "eventTags": {
         "is_original_click": true
     }
