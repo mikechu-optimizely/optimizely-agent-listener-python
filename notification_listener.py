@@ -13,7 +13,8 @@ import time
 from enum import Enum, auto
 from typing import Dict, Any, Optional, Callable, Awaitable
 import aiohttp
-from aiosseclient import aiosseclient
+from aiohttp_sse_client import client as sse_client
+import random
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class NotificationListener:
         self.running = False
         self.session = None
         self.task = None
+        self.stop_event = asyncio.Event()
         
         # Construct the notification URL with filter if provided
         self.notification_url = f"{agent_base_url}/v1/notifications/event-stream"
@@ -103,7 +105,6 @@ class NotificationListener:
             return
         
         self.running = True
-        self.session = aiohttp.ClientSession()
         self.task = asyncio.create_task(self._listen_loop())
         logger.info("Notification listener started")
     
@@ -154,146 +155,182 @@ class NotificationListener:
         processes incoming events, and manages reconnection logic.
         """
         retry_count = 0
+        last_activity_time = time.time()
         
-        # Set up headers with SDK key
-        headers = {
-            "X-Optimizely-Sdk-Key": self.sdk_key, 
-            "Accept": "text/event-stream",
-            "User-Agent": "OptimizelyNotificationListener/1.0",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
-        
-        logger.info(f"Connecting to SSE endpoint: {self.notification_url}")
-        logger.info(f"Using SDK key: {self.sdk_key}")
-        
-        while self.running and retry_count < self.max_retries:
+        while not self.stop_event.is_set():
             try:
-                logger.debug(f"Sending request with headers: {headers}")
+                # Check if the Optimizely Agent is running before connecting
+                agent_running = await self._check_agent_health()
+                if not agent_running:
+                    logger.error("Optimizely Agent is not running. Will retry in 10 seconds.")
+                    await asyncio.sleep(10)
+                    continue
                 
-                # Connect to the SSE endpoint using aiosseclient
-                last_activity_time = time.time()
+                logger.info(f"Connecting to SSE endpoint: {self.notification_url}")
                 
-                async for event in aiosseclient(
+                # Set up headers with SDK key
+                headers = {
+                    "X-Optimizely-SDK-Key": self.sdk_key,
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache"
+                }
+                
+                # Use the sse_client library for handling SSE events
+                async with sse_client.EventSource(
                     self.notification_url,
-                    headers=headers
-                ):
-                    # Reset retry counter after successful connection
-                    retry_count = 0
-                    
-                    # Update last activity time
-                    last_activity_time = time.time()
-                    
-                    if event.data:
-                        # Extract user ID for logging
-                        user_id = "unknown"
-                        try:
-                            event_data = json.loads(event.data)
-                            if "UserContext" in event_data and "ID" in event_data["UserContext"]:
-                                user_id = event_data["UserContext"]["ID"]
-                            elif "userId" in event_data:
-                                user_id = event_data["userId"]
-                            
-                            # Determine the notification type based on the event data
-                            notification_type = self._determine_notification_type(event_data)
-                            
-                            # Add notification_type as a custom attribute to the event_data
-                            event_data["notification_type"] = notification_type
-                            
-                            # Log a more detailed summary of the event
-                            logger.debug(f"Received {notification_type} event for user {user_id}: {event.data[:100]}...")
-                            
-                            # For decision events, extract and log the flag key and variation
-                            if notification_type == NotificationType.DECISION and "DecisionInfo" in event_data:
-                                decision_info = event_data["DecisionInfo"]
-                                flag_key = decision_info.get("flagKey", "unknown")
-                                variation_key = decision_info.get("variationKey", "unknown")
-                                logger.debug(f"Decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
-                        except json.JSONDecodeError:
-                            logger.error(f"Failed to parse event data as JSON: {event.data[:100]}...")
-                        except Exception as e:
-                            logger.error(f"Error extracting event details: {str(e)}")
+                    headers=headers,
+                    timeout=30  # Timeout for initial connection
+                ) as event_source:
+                    async for event in event_source:
+                        # Reset retry counter after successful connection
+                        retry_count = 0
                         
-                        try:
-                            # Log additional details based on notification type
-                            if notification_type == NotificationType.TRACK:
-                                event_key = event_data.get("EventKey", "unknown")
-                                logger.debug(f"Track event details - Event: {event_key}, User: {user_id}")
+                        # Update last activity time
+                        last_activity_time = time.time()
+                        
+                        if event.data:
+                            # Extract user ID for logging
+                            user_id = "unknown"
+                            try:
+                                event_data = json.loads(event.data)
+                                if "UserContext" in event_data and "ID" in event_data["UserContext"]:
+                                    user_id = event_data["UserContext"]["ID"]
+                                elif "userId" in event_data:
+                                    user_id = event_data["userId"]
+                                
+                                # Determine the notification type based on the event data
+                                notification_type = self._determine_notification_type(event_data)
+                                
+                                # Add notification_type as a custom attribute to the event_data
+                                event_data["notification_type"] = notification_type
+                                
+                                # Log a more detailed summary of the event
+                                logger.debug(f"Received {notification_type} event for user {user_id}: {event.data[:100]}...")
+                                
+                                # For decision events, extract and log the flag key and variation
+                                if notification_type == NotificationType.DECISION and "DecisionInfo" in event_data:
+                                    decision_info = event_data["DecisionInfo"]
+                                    flag_key = decision_info.get("flagKey", "unknown")
+                                    variation_key = decision_info.get("variationKey", "unknown")
+                                    logger.debug(f"Decision details - Flag: {flag_key}, Variation: {variation_key}, User: {user_id}")
+                            except json.JSONDecodeError:
+                                logger.error(f"Failed to parse event data as JSON: {event.data[:100]}...")
+                            except Exception as e:
+                                logger.error(f"Error extracting event details: {str(e)}")
                             
-                            # Process the event with the callback if provided
-                            if self.event_callback:
-                                await self.event_callback(event)
-                        except Exception as e:
-                            logger.error(f"Error processing notification: {str(e)}")
-                    else:
-                        # Empty data might be a heartbeat or keep-alive
-                        logger.debug("Received event with empty data (possible heartbeat)")
-                    
-                    # Check for heartbeat timeout
-                    current_time = time.time()
-                    if current_time - last_activity_time > self.heartbeat_interval:
-                        logger.warning(f"No activity for {self.heartbeat_interval} seconds, checking connection...")
-                        # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
-                        try:
-                            health_url = f"{self.agent_base_url}/health"
-                            logger.debug(f"Sending ping to health endpoint: {health_url}")
-                            
-                            # Use the session to make the request
-                            async with self.session.get(health_url, timeout=5) as response:
-                                logger.debug(f"Health ping response: {response.status}")
-                            
-                            # Reset last activity time
-                            last_activity_time = time.time()
-                        except Exception as ping_error:
-                            logger.error(f"Error sending health ping: {str(ping_error)}")
-                            # Force a reconnection
-                            raise Exception("Connection inactive, forcing reconnection")
-            
-            except asyncio.CancelledError:
-                logger.info("Async task was cancelled. Shutting down...")
-                break
-                
-            except (aiohttp.ClientError, aiohttp.ClientPayloadError, aiohttp.ClientResponseError) as e:
-                retry_count += 1
-                logger.error(f"SSE client error (retry {retry_count}/{self.max_retries}): {str(e)}")
-                logger.info("This is likely due to the server closing the connection unexpectedly.")
-                
-                # Shorter wait time for SSE client errors as it's usually temporary
-                wait_time = 2 * retry_count
-                logger.info(f"Retrying in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
-                
-                # Check if the agent is still running before retrying
-                try:
-                    # Extract base URL for health check
-                    health_url = f"{self.agent_base_url}/health"
-                    logger.debug(f"Checking if Optimizely Agent is still running: {health_url}")
-                    
-                    # Use the session to make the request
-                    async with self.session.get(health_url, timeout=5) as response:
-                        logger.debug(f"Agent health check response: {response.status}")
-                        if response.status == 200:
-                            logger.info("Optimizely Agent is still running. Will reconnect.")
+                            try:
+                                # Log additional details based on notification type
+                                if notification_type == NotificationType.TRACK:
+                                    event_key = event_data.get("EventKey", "unknown")
+                                    logger.debug(f"Track event details - Event: {event_key}, User: {user_id}")
+                                
+                                # Process the event with the callback if provided
+                                if self.event_callback:
+                                    await self.event_callback(event)
+                            except Exception as e:
+                                logger.error(f"Error processing notification: {str(e)}")
                         else:
-                            logger.error(f"Agent health check failed with status: {response.status}")
-                            raise Exception("Agent health check failed")
-                except Exception as health_check_error:
-                    logger.error(f"Error checking agent health: {str(health_check_error)}")
-                    # Continue with retry anyway, in case it's a temporary network issue
-                
-            except Exception as e:
+                            # Empty data might be a heartbeat or keep-alive
+                            logger.debug("Received event with empty data (possible heartbeat)")
+                        
+                        # Check for heartbeat timeout
+                        current_time = time.time()
+                        if current_time - last_activity_time > self.heartbeat_interval:
+                            logger.warning(f"No activity for {self.heartbeat_interval} seconds, checking connection...")
+                            # Send a ping to the Optimizely Agent health endpoint to keep the connection alive
+                            try:
+                                health_url = f"{self.agent_base_url}/health"
+                                logger.debug(f"Sending ping to health endpoint: {health_url}")
+                                
+                                # Create a temporary session for the health check
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                                        if response.status == 200:
+                                            logger.debug("Health check successful, connection is alive")
+                                            last_activity_time = current_time  # Reset the activity timer
+                                        else:
+                                            logger.warning(f"Health check failed with status {response.status}")
+                                            # Break out of the event loop to trigger a reconnection
+                                            break
+                            except Exception as e:
+                                logger.error(f"Error during health check: {str(e)}")
+                                # Break out of the event loop to trigger a reconnection
+                                break
+            
+            except aiohttp.ClientPayloadError as e:
+                if "TransferEncodingError" in str(e):
+                    retry_count += 1
+                    logger.error(f"Transfer encoding error detected (retry {retry_count}/{self.max_retries}): {str(e)}")
+                    logger.info("This is likely due to the server closing the connection unexpectedly.")
+                    
+                    # Calculate backoff time with jitter
+                    backoff_time = min(30, 2 ** retry_count) * (0.5 + random.random())
+                    logger.info(f"Retrying in {backoff_time:.2f} seconds with exponential backoff...")
+                    
+                    # Check if the agent is still running before reconnecting
+                    agent_running = await self._check_agent_health()
+                    if agent_running:
+                        logger.info("Optimizely Agent is still running. Will reconnect.")
+                    else:
+                        logger.error("Optimizely Agent is not running. Will retry after backoff.")
+                    
+                    await asyncio.sleep(backoff_time)
+                else:
+                    # Handle other ClientPayloadErrors
+                    retry_count += 1
+                    logger.error(f"Client payload error (retry {retry_count}/{self.max_retries}): {str(e)}")
+                    await asyncio.sleep(min(30, retry_count * 5))
+            
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 retry_count += 1
                 logger.error(f"Connection error (retry {retry_count}/{self.max_retries}): {str(e)}")
                 
-                # Exponential backoff for general errors
-                wait_time = min(5 * retry_count, 60)  # Cap at 60 seconds
-                logger.info(f"Retrying in {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
+                # For connection errors, use a simpler backoff strategy
+                backoff_time = min(30, retry_count * 5)
+                logger.info(f"Retrying in {backoff_time} seconds...")
+                await asyncio.sleep(backoff_time)
+            
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Unexpected error (retry {retry_count}/{self.max_retries}): {str(e)}")
+                
+                # For unexpected errors, use a simpler backoff strategy
+                backoff_time = min(30, retry_count * 5)
+                logger.info(f"Retrying in {backoff_time} seconds...")
+                await asyncio.sleep(backoff_time)
+            
+            # Check if we've exceeded the maximum number of retries
+            if retry_count >= self.max_retries:
+                logger.error(f"Maximum retry attempts ({self.max_retries}) reached. Stopping listener.")
+                self.stop_event.set()
+                break
+    
+    async def _check_agent_health(self):
+        """
+        Check if the Optimizely Agent is running.
         
-        # If we've exhausted all retries, log an error
-        if retry_count >= self.max_retries and self.running:
-            logger.error("Max retries exceeded. Exiting.")
-            self.running = False
+        Args:
+            None
+        
+        Returns:
+            bool: True if the agent is running, False otherwise
+        """
+        try:
+            health_url = f"{self.agent_base_url}/health"
+            logger.debug(f"Checking if Optimizely Agent is still running: {health_url}")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(health_url, timeout=3) as response:
+                    logger.debug(f"Agent health check response: {response.status}")
+                    if response.status == 200:
+                        logger.info("Optimizely Agent is still running.")
+                        return True
+                    else:
+                        logger.error(f"Agent health check failed with status: {response.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error checking agent health: {str(e)}")
+            return False
 
 async def test_agent_connection(sdk_key: str, agent_base_url: str) -> bool:
     """
