@@ -94,11 +94,10 @@ async def send_parallel_requests(session: aiohttp.ClientSession, user_ids: List[
 async def simulate_production_traffic() -> None:
     """
     Simulate production traffic by sending a mix of sequential and parallel requests.
-    Each user ID is used exactly once.
+    Each user ID is used exactly once. Sequential requests use IDs in numerical order.
     """
-    # Create a list of all available user IDs
+    # Create a list of all available user IDs in sequential order
     all_user_ids = list(range(USER_ID_START, USER_ID_END + 1))
-    random.shuffle(all_user_ids)  # Shuffle to ensure random distribution
     
     # Allocate user IDs for sequential and parallel phases
     sequential_user_ids = all_user_ids[:SEQUENTIAL_REQUESTS]
