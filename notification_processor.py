@@ -32,20 +32,17 @@ class NotificationProcessor:
         self.ga_enabled = ga_enabled
         self.amplitude_enabled = amplitude_enabled
         
-    async def process_notification(self, event):
+    async def process_notification(self, event_data):
         """
         Process a notification event from the Optimizely Agent.
         
         Args:
-            event: The event object from the SSE client
+            event_data: The event data from the SSE client, already parsed as a dictionary
             
         Returns:
             Boolean indicating success
         """
         try:
-            # Parse the event data
-            event_data = json.loads(event.data)
-            
             # Extract user ID for logging
             user_id = "unknown"
             if "UserContext" in event_data and "ID" in event_data["UserContext"]:
@@ -56,6 +53,16 @@ class NotificationProcessor:
             # Get notification type that was set by the NotificationListener
             notification_type = event_data.get("notification_type", NotificationType.UNKNOWN)                    
             logger.info(f"Received notification type: {notification_type} for user: {user_id}")
+
+            # Only write to the file if we have a valid user ID
+            # if user_id != "unknown":
+            #     # Let's append to a local file the user_id we receive each on a new line
+            #     try:
+            #         with open("user_ids.txt", "a") as f:
+            #             f.write(f"{user_id}\n")
+            #             f.flush()  # Ensure the data is written immediately
+            #     except Exception as e:
+            #         logger.error(f"Error writing to user_ids.txt: {str(e)}")
             
             # Process based on notification type
             if notification_type == NotificationType.DECISION and "DecisionInfo" in event_data:
@@ -114,9 +121,6 @@ class NotificationProcessor:
             
             return success_count > 0 or total_platforms == 0
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse notification data: {str(e)}")
-            return False
         except Exception as e:
             logger.error(f"Error processing notification: {str(e)}")
             return False

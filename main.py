@@ -59,11 +59,19 @@ async def handle_event(event):
     logger.debug(f"Received event: {event}")
     
     try:
-        # Parse the event data
-        event_data = json.loads(event.data)
-        
-        # Add to the buffer
-        await buffer.add_event(event_data)
+        # Check if event is a dictionary with a data key
+        if isinstance(event, dict) and "data" in event:
+            # If data is already a dictionary, use it directly
+            if isinstance(event["data"], dict):
+                event_data = event["data"]
+            else:
+                # Otherwise, parse the data as JSON
+                event_data = json.loads(event["data"])
+            
+            # Add to the buffer
+            await buffer.add_event(event_data)
+        else:
+            logger.error(f"Invalid event format: {event}")
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse event data: {str(e)}")
     except Exception as e:
@@ -87,7 +95,7 @@ async def process_buffered_event(event_data):
             event_data["notification_type"] = determine_notification_type(event_data)
             
         # Use the notification processor to process the event
-        success = await processor.process_notification(type('Event', (), {'data': json.dumps(event_data)}))
+        success = await processor.process_notification(event_data)
         logger.debug(f"Processed buffered event: {event_data}")
         return success
     except Exception as e:
