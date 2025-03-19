@@ -119,9 +119,6 @@ The script will automatically load environment variables from the `.env` file if
 You can test the listener by sending requests to the Optimizely Agent's decide endpoint. The included `decide_testing.py` script simulates production traffic patterns:
 
 ```bash
-# Set your SDK key in the environment
-export OPTIMIZELY_SDK_KEY=your_sdk_key
-
 # Run the testing script
 python decide_testing.py
 ```

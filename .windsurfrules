@@ -13,7 +13,7 @@
 
 ## Error Handling
 - Implement retry mechanisms with exponential backoff for failed requests to Google and Amplitude
-- Handle SSE connection errors and reconnect to Optimizely Agent as needed
+- Handle SSE connection errors and disconnects to Optimizely Agent
 - Log errors with relevant context for debugging and analytics
 
 ## Performance Optimization
@@ -24,18 +24,14 @@
 ## Security
 - Validate and sanitize incoming SSE event data to prevent security vulnerabilities
 - Implement authentication and authorization mechanisms for Google and Amplitude APIs
-- Watch for the User to accidentally expose sensitive data in code and notify about it in the Cascade chat using emojis for attention
+- Watch for the User to accidentally expose sensitive data in code and notify in the chat using emojis for attention
 - Limit communication between containers to the necessary minimum
 
 ## Scalability
-- Design the app as a side car container to Optimizely agent 
+- Design the app as a side car container to Optimizely Agent 
 - Consider that the pod will scale horizontally to handle increased traffic and event volumes
 - Implement queueing mechanisms to handle event bursts and prevent data loss
 
 ## Monitoring and Logging
 - Implement logging mechanisms to track errors, warnings, and information events to standard output
 - Use logging and monitoring data to inform optimization and debugging efforts
-
-## Testing
-- Write comprehensive unit tests and integration tests to ensure app functionality
-- Use testing data to inform optimization and debugging efforts
