@@ -35,3 +35,14 @@
 ## Monitoring and Logging
 - Implement logging mechanisms to track errors, warnings, and information events to standard output
 - Use logging and monitoring data to inform optimization and debugging efforts
+
+## End to End Testing
+1. Assume I have already started Optimizely Agent in my own terminal session
+2. Run `python main.py` to start the application in terminal session #1
+3. Run `python decide_testing.py` in terminal session #2 to send events and wait for it to finish
+4. Read the number of lines in `user_ids.txt` by running `(Get-Content user_ids.txt | Measure-Object -Line).Lines`
+5. A positive test is when we have 101 rows in `user_ids.txt`
+6. No need to remove the `user_ids.txt` file as the `decide_testing.py` script deletes it
+7. Monitor the terminal session two for the `decide_testing` script to finish
+8. Look for errors in terminal session #1
+9. Use `Stop-Process -Id (Get-Process -Name python).Id -Force` to clean up
