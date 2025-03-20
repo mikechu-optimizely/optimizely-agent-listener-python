@@ -9,13 +9,11 @@ and processes incoming events.
 import asyncio
 import json
 import logging
-import time
 import uuid
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, Awaitable, List
+from typing import Dict, Any, Optional, Callable, Awaitable
 import httpx
 import random
-from functools import lru_cache
 from datetime import datetime, timedelta
 
 # Set up logging
